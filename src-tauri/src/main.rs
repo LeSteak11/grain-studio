@@ -269,6 +269,30 @@ async fn rename_path(from: String, to: String) -> Result<(), String> {
     fs::rename(from, to).map_err(err)
 }
 
+/// Fetches an image URL dragged/pasted from a browser (native side = no CORS).
+#[tauri::command]
+async fn download_url(url: String) -> Result<Response, String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("only http(s) links can be downloaded".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Read;
+        let referer = url.splitn(4, '/').take(3).collect::<Vec<_>>().join("/") + "/";
+        let resp = ureq::get(&url)
+            .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36")
+            .set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+            .set("Referer", &referer)
+            .timeout(std::time::Duration::from_secs(30))
+            .call()
+            .map_err(err)?;
+        let mut buf = Vec::new();
+        resp.into_reader().take(300_000_000).read_to_end(&mut buf).map_err(err)?;
+        Ok(Response::new(buf))
+    })
+    .await
+    .map_err(err)?
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     std::process::Command::new("explorer").arg(path).spawn().map(|_| ()).map_err(err)
@@ -288,6 +312,7 @@ fn main() {
             import_files,
             remove_paths,
             rename_path,
+            download_url,
             open_path
         ])
         .run(tauri::generate_context!())

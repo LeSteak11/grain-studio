@@ -194,7 +194,6 @@ export function Editor() {
         if (k === 'z') e.shiftKey ? redo(cur) : undo(cur);
         else if (k === 'y') redo(cur);
         else if (k === 'c') copyEdits(cur);
-        else if (k === 'v') pasteEdits([cur]);
         else if (k === 'e') openExport([cur]);
         else return;
         e.preventDefault();

@@ -71,7 +71,6 @@ export function Library() {
       if (e.ctrlKey || e.metaKey) {
         if (k === 'a') store.set({ selection: new Set(list.map((p) => p.id)) });
         else if (k === 'c' && sel.length) copyEdits(sel[0]);
-        else if (k === 'v' && sel.length) pasteEdits(sel);
         else if (k === 'e' && sel.length) openExport(sel);
         else if (k === 'i') void pickAndImport();
         else return;
@@ -156,7 +155,7 @@ export function Library() {
           <div className="empty">
             <div className="empty-mark" />
             <h2>Your studio is empty</h2>
-            <p>Drop photos or folders anywhere, or</p>
+            <p>Drag photos in from your browser or Explorer, paste an image with Ctrl+V, or</p>
             <button
               className="primary"
               onClick={(e) => {

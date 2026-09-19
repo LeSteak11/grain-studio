@@ -1,5 +1,5 @@
-import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { installDropAndPaste } from './dropin';
 import { ask, open } from '@tauri-apps/plugin-dialog';
 import { fsx, paths, setRoot } from './fs';
 import { clearBusy, setBusy, store, toast, visiblePhotos } from './store';
@@ -46,17 +46,7 @@ export async function initApp() {
     startPersistence();
     store.set({ ready: true, root, photos, edits, recipes, luts });
 
-    const webview = getCurrentWebview();
-    await webview.onDragDropEvent((e) => {
-      const p = e.payload;
-      if (p.type === 'enter' || p.type === 'over') {
-        if (!store.get().dragOver) store.set({ dragOver: true });
-      } else if (p.type === 'leave') store.set({ dragOver: false });
-      else if (p.type === 'drop') {
-        store.set({ dragOver: false });
-        if (p.paths.length) void importPaths(p.paths);
-      }
-    });
+    installDropAndPaste();
     await getCurrentWindow().onCloseRequested(async () => {
       await flushAll();
     });
@@ -73,23 +63,81 @@ export async function pickAndImport() {
 }
 
 let importing = false;
+let idSeq = 0;
+
+const ascii = (b: Uint8Array, s: number, e: number) => String.fromCharCode(...b.subarray(s, e));
+
+/** Detects the real image type from its first bytes (browser drops/pastes often lack a usable name). */
+export function sniffExt(b: Uint8Array): string | null {
+  if (b.length < 12) return null;
+  if (b[0] === 0xff && b[1] === 0xd8) return 'jpg';
+  if (b[0] === 0x89 && ascii(b, 1, 4) === 'PNG') return 'png';
+  if (ascii(b, 0, 3) === 'GIF') return 'gif';
+  if (b[0] === 0x42 && b[1] === 0x4d) return 'bmp';
+  if (ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WEBP') return 'webp';
+  if (ascii(b, 4, 8) === 'ftyp' && ascii(b, 8, 11) === 'avi') return 'avif';
+  return null;
+}
+
+/** One thing to import: returns the library copy's id/path plus its bytes (for the thumbnail). */
+export interface ImportJob {
+  name: string;
+  load: () => Promise<{ id: string; path: string; name: string; bytes: Uint8Array }>;
+}
+
+/** Job for raw bytes (browser drag, clipboard, download): written into the library first. */
+export function bytesJob(name: string, getBytes: () => Promise<Uint8Array>): ImportJob {
+  return {
+    name,
+    load: async () => {
+      const bytes = await getBytes();
+      const ext = sniffExt(bytes);
+      if (!ext) throw new Error('not a supported image (JPEG, PNG, WebP, AVIF, GIF, BMP)');
+      const id = `${Date.now().toString(16)}${(idSeq++ % 0xfffff).toString(16).padStart(5, '0')}`;
+      const path = `${paths.originals()}\\${id}.${ext}`;
+      await fsx.writeBytes(path, bytes);
+      const base = name.replace(/\.[a-z0-9]{2,5}$/i, '') || 'Image';
+      return { id, path, name: `${base}.${ext}`, bytes };
+    },
+  };
+}
 
 export async function importPaths(input: string[]) {
   if (importing) {
     toast('Import already running');
     return;
   }
-  importing = true;
+  setBusy('Copying', 0, 0);
   try {
-    setBusy('Copying', 0, 0);
     const skip = store.get().photos.map((p) => `${p.name}|${p.size}`);
     const items = await fsx.importFiles(input, paths.originals(), skip);
     if (!items.length) {
+      clearBusy();
       toast('No new photos found');
       return;
     }
+    await runImport(
+      items.map((it) => ({ name: it.name, load: async () => ({ id: it.id, path: it.path, name: it.name, bytes: await fsx.readBytes(it.path) }) })),
+      false,
+    );
+  } catch (e) {
+    clearBusy();
+    toast(`Import failed: ${e}`);
+  }
+}
+
+/** Shared pipeline: load/copy → worker thumbnail → add to library. Opens the editor if `openSingle` and one photo came in. */
+export async function runImport(jobs: ImportJob[], openSingle: boolean) {
+  if (importing) {
+    toast('Import already running');
+    return;
+  }
+  if (!jobs.length) return;
+  importing = true;
+  const added: string[] = [];
+  const errors: string[] = [];
+  try {
     let done = 0;
-    let failed = 0;
     let buffer: Photo[] = [];
     const flush = () => {
       if (!buffer.length) return;
@@ -98,37 +146,44 @@ export async function importPaths(input: string[]) {
       store.set((s) => ({ photos: [...add, ...s.photos] }));
     };
     const flushTimer = window.setInterval(flush, 250);
-    setBusy('Importing', 0, items.length);
-    const queue = [...items];
+    setBusy('Importing', 0, jobs.length);
+    const queue = jobs.map((j, i) => ({ j, i }));
     const now = Date.now();
     await Promise.all(
       Array.from({ length: THUMB_CONCURRENCY }, async () => {
-        for (let it = queue.shift(); it; it = queue.shift()) {
+        for (let q = queue.shift(); q; q = queue.shift()) {
+          let written: string | null = null;
           try {
-            const bytes = await fsx.readBytes(it.path);
-            const t = await makeThumb(bytes);
-            await fsx.writeBytes(paths.thumb(it.id), new Uint8Array(t.buf));
-            buffer.push({ id: it.id, file: it.path, name: it.name, size: it.size, w: t.w, h: t.h, added: now - items.indexOf(it) });
+            const got = await q.j.load();
+            written = got.path;
+            const size = got.bytes.byteLength;
+            const t = await makeThumb(got.bytes);
+            await fsx.writeBytes(paths.thumb(got.id), new Uint8Array(t.buf));
+            buffer.push({ id: got.id, file: got.path, name: got.name, size, w: t.w, h: t.h, added: now - q.i });
+            added.push(got.id);
           } catch (e) {
-            console.warn('import failed', it.name, e);
-            failed++;
-            await fsx.remove([it.path]).catch(() => undefined);
+            console.warn('import failed', q.j.name, e);
+            errors.push(e instanceof Error ? e.message : String(e));
+            if (written) await fsx.remove([written]).catch(() => undefined);
           }
           done++;
-          setBusy('Importing', done, items.length);
+          setBusy('Importing', done, jobs.length);
         }
       }),
     );
     clearInterval(flushTimer);
     flush();
     store.set((s) => ({ photos: [...s.photos].sort((a, b) => b.added - a.added) }));
-    const ok = items.length - failed;
-    toast(failed ? `Imported ${ok} · ${failed} couldn't be read (HEIC/RAW aren't supported yet)` : `Imported ${ok} photo${ok === 1 ? '' : 's'}`);
-  } catch (e) {
-    toast(`Import failed: ${e}`);
+    const ok = added.length;
+    if (!ok) toast(`Couldn't import: ${errors[0] ?? 'unknown error'}`);
+    else toast(errors.length ? `Imported ${ok} · ${errors.length} failed (HEIC/RAW aren't supported yet)` : `Imported ${ok} photo${ok === 1 ? '' : 's'}`);
   } finally {
     importing = false;
     clearBusy();
+  }
+  if (openSingle && added.length === 1) {
+    store.set({ filter: 'all' });
+    openEditor(added[0]);
   }
 }
 
