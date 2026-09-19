@@ -10,11 +10,14 @@ export const join = (...parts: string[]) => parts.join('\\').replace(/\\{2,}/g, 
 export const paths = {
   library: () => join(ROOT, 'library.json'),
   recipes: () => join(ROOT, 'recipes.json'),
+  prefs: () => join(ROOT, 'prefs.json'),
   originals: () => join(ROOT, 'originals'),
   editsDir: () => join(ROOT, 'edits'),
   edit: (id: string) => join(ROOT, 'edits', `${id}.json`),
   thumb: (id: string) => join(ROOT, 'thumbs', `${id}.jpg`),
   editedThumb: (id: string) => join(ROOT, 'thumbs', `${id}.e.jpg`),
+  preview: (id: string) => join(ROOT, 'previews', `${id}.jpg`),
+  dragDir: () => join(ROOT, 'drag'),
   lutsDir: () => join(ROOT, 'luts'),
   lut: (name: string) => join(ROOT, 'luts', `${name}.cube`),
   exports: () => join(ROOT, 'Exports'),
@@ -43,6 +46,8 @@ export const fsx = {
   remove: (paths: string[]) => invoke<void>('remove_paths', { paths }),
   rename: (from: string, to: string) => invoke<void>('rename_path', { from, to }),
   openPath: (path: string) => invoke<void>('open_path', { path }),
+  convertHeic: (src: string, dst: string) => invoke<void>('convert_heic', { src, dst }),
+  clearDir: (path: string) => invoke<void>('clear_dir', { path }),
 };
 
 export function fileUrl(path: string, rev?: number): string {

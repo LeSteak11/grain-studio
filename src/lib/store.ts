@@ -18,6 +18,8 @@ export interface AppState {
   /** Names of user LUTs in the luts folder (id = "u:" + name). */
   luts: string[];
   recipes: Recipe[];
+  /** Preset ids starred by the user (shown first). */
+  favPresets: string[];
   view: 'library' | 'editor';
   currentId: string | null;
   selection: Set<string>;
@@ -50,6 +52,7 @@ let state: AppState = {
   edits: {},
   luts: [],
   recipes: [],
+  favPresets: [],
   view: 'library',
   currentId: null,
   selection: new Set(),

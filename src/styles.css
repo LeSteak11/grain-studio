@@ -227,3 +227,49 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .toast { position: fixed; left: 50%; bottom: 48px; transform: translateX(-50%); z-index: 70; background: var(--accent); color: #111; font-weight: 600; padding: 9px 18px; border-radius: 999px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); max-width: 80vw; animation: fade 0.15s; }
 .drop-hint { position: fixed; inset: 10px; border: 2px dashed var(--accent); border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 600; background: rgba(10, 10, 10, 0.75); z-index: 80; pointer-events: none; }
 .splash { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--dim); }
+
+/* ---- Round 1 additions ---- */
+.selbar.show { overflow: visible; }
+.pop { position: relative; display: inline-flex; }
+.pop > button { padding: 6px 11px; border-radius: 999px; }
+.pop > button:hover:not(:disabled), .pop > button.on { background: var(--panel2); }
+.ghost-pop > button { padding: 7px 12px; }
+.pop-body { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; background: var(--panel2); border: 1px solid var(--line2); border-radius: 10px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55); padding: 6px; min-width: 240px; animation: fade 0.1s; }
+.tb-right .pop-body { left: auto; right: 0; }
+.menu { display: flex; flex-direction: column; }
+.menu button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 8px 10px; border-radius: 6px; white-space: nowrap; }
+.menu button:hover:not(:disabled) { background: #262626; }
+.menu kbd { margin-left: auto; }
+.picker { width: 280px; }
+.picker input, .search { width: 100%; background: var(--bg); border: 1px solid var(--line2); border-radius: var(--r); color: var(--text); padding: 7px 10px; outline: none; }
+.picker input:focus, .search:focus { border-color: var(--dim); }
+.picker-list { max-height: 320px; overflow-y: auto; margin-top: 6px; display: flex; flex-direction: column; }
+.picker-list button { text-align: left; padding: 7px 10px; border-radius: 6px; }
+.picker-list button:hover { background: #262626; }
+.star { color: #ffd65a; margin-right: 6px; }
+.search { margin-bottom: 4px; }
+
+.preset-tile { position: relative; }
+.tile-hit { display: flex; flex-direction: column; gap: 5px; align-items: stretch; width: 100%; }
+.tile-hit:hover .code { color: var(--text); }
+.fav-star { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 12px; opacity: 0; transition: opacity 0.1s; }
+.preset-tile:hover .fav-star, .fav-star.on { opacity: 1; }
+.fav-star.on { color: #ffd65a; }
+
+.curve-tabs { display: flex; gap: 4px; align-items: center; margin: 4px 0 8px; }
+.curve-tabs button:not(.link) { padding: 4px 10px; border-radius: 999px; font-weight: 700; font-size: 11px; opacity: 0.55; position: relative; }
+.curve-tabs button.on { opacity: 1; background: var(--panel2); }
+.curve-tabs button.touched::after { content: ''; position: absolute; top: 2px; right: 2px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.curve-svg { width: 100%; aspect-ratio: 1; background: #101010; border-radius: var(--r); touch-action: none; cursor: crosshair; display: block; }
+
+.split-line { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(255, 255, 255, 0.9); cursor: ew-resize; z-index: 3; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3); }
+.split-line::before { content: ''; position: absolute; inset: 0 -10px; }
+.split-knob { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 30px; height: 30px; border-radius: 50%; background: #fff; color: #111; display: flex; align-items: center; justify-content: center; font-size: 13px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5); }
+.split-label { position: absolute; top: 10px; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; background: rgba(0, 0, 0, 0.6); padding: 3px 7px; border-radius: 3px; white-space: nowrap; pointer-events: none; }
+.split-label.l { right: 10px; }
+.split-label.r { left: 10px; }
+.histogram { position: absolute; top: 12px; right: 12px; width: 240px; height: 110px; background: rgba(12, 12, 12, 0.78); border: 1px solid var(--line2); border-radius: 8px; pointer-events: none; backdrop-filter: blur(6px); }
+.drag-out { padding: 7px 12px; border-radius: 999px; border: 1px dashed var(--line2); cursor: grab; color: var(--text); }
+.drag-out:hover { border-color: var(--dim); background: var(--panel2); }
+.drag-out:active { cursor: grabbing; }
+.tile { cursor: grab; }

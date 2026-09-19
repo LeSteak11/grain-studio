@@ -8,19 +8,20 @@ import { flushAll, startPersistence } from './persist';
 import { makeThumb, THUMB_CONCURRENCY } from './thumbgen';
 import { dropThumbBitmap } from './thumbs';
 import { dropFull } from './sources';
-import { defaultEdit, isEdited, normalizeEdit, withGeometryOf, type EditState, type Photo, type Recipe } from './types';
+import { defaultEdit, isEdited, normalizeEdit, presetOf, toolsOf, withGeometryOf, type EditState, type PasteMode, type Photo, type Recipe } from './types';
 
-export const IMAGE_EXTS = ['jpg', 'jpeg', 'jfif', 'png', 'webp', 'bmp', 'gif', 'avif'];
+export const IMAGE_EXTS = ['jpg', 'jpeg', 'jfif', 'png', 'webp', 'bmp', 'gif', 'avif', 'heic', 'heif'];
 
 export async function initApp() {
   try {
     const root = await fsx.root();
     setRoot(root);
-    const [libTxt, editsRaw, recTxt, luts] = await Promise.all([
+    const [libTxt, editsRaw, recTxt, luts, prefsTxt] = await Promise.all([
       fsx.readText(paths.library()),
       fsx.readAllText(paths.editsDir(), 'json'),
       fsx.readText(paths.recipes()),
       fsx.listDir(paths.lutsDir(), 'cube'),
+      fsx.readText(paths.prefs()),
     ]);
     let photos: Photo[] = [];
     try {
@@ -43,8 +44,15 @@ export async function initApp() {
     } catch {
       recipes = [];
     }
+    let favPresets: string[] = [];
+    try {
+      favPresets = prefsTxt ? (JSON.parse(prefsTxt).favPresets ?? []) : [];
+    } catch {
+      favPresets = [];
+    }
     startPersistence();
-    store.set({ ready: true, root, photos, edits, recipes, luts });
+    store.set({ ready: true, root, photos, edits, recipes, luts, favPresets });
+    void fsx.clearDir(paths.dragDir()).catch(() => undefined);
 
     installDropAndPaste();
     await getCurrentWindow().onCloseRequested(async () => {
@@ -76,6 +84,7 @@ export function sniffExt(b: Uint8Array): string | null {
   if (b[0] === 0x42 && b[1] === 0x4d) return 'bmp';
   if (ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WEBP') return 'webp';
   if (ascii(b, 4, 8) === 'ftyp' && ascii(b, 8, 11) === 'avi') return 'avif';
+  if (ascii(b, 4, 8) === 'ftyp' && ['heic', 'heix', 'hevc', 'heim', 'heis', 'mif1', 'msf1'].includes(ascii(b, 8, 12))) return 'heic';
   return null;
 }
 
@@ -92,11 +101,18 @@ export function bytesJob(name: string, getBytes: () => Promise<Uint8Array>): Imp
     load: async () => {
       const bytes = await getBytes();
       const ext = sniffExt(bytes);
-      if (!ext) throw new Error('not a supported image (JPEG, PNG, WebP, AVIF, GIF, BMP)');
+      if (!ext) throw new Error('not a supported image (JPEG, PNG, WebP, AVIF, GIF, BMP, HEIC)');
       const id = `${Date.now().toString(16)}${(idSeq++ % 0xfffff).toString(16).padStart(5, '0')}`;
+      const base = name.replace(/\.[a-z0-9]{2,5}$/i, '') || 'Image';
+      if (ext === 'heic') {
+        const tmp = `${paths.originals()}\\${id}.heic`;
+        const path = `${paths.originals()}\\${id}.jpg`;
+        await fsx.writeBytes(tmp, bytes);
+        await fsx.convertHeic(tmp, path);
+        return { id, path, name: `${base}.jpg`, bytes: await fsx.readBytes(path) };
+      }
       const path = `${paths.originals()}\\${id}.${ext}`;
       await fsx.writeBytes(path, bytes);
-      const base = name.replace(/\.[a-z0-9]{2,5}$/i, '') || 'Image';
       return { id, path, name: `${base}.${ext}`, bytes };
     },
   };
@@ -159,7 +175,8 @@ export async function runImport(jobs: ImportJob[], openSingle: boolean) {
             const size = got.bytes.byteLength;
             const t = await makeThumb(got.bytes);
             await fsx.writeBytes(paths.thumb(got.id), new Uint8Array(t.buf));
-            buffer.push({ id: got.id, file: got.path, name: got.name, size, w: t.w, h: t.h, added: now - q.i });
+            if (t.pbuf) await fsx.writeBytes(paths.preview(got.id), new Uint8Array(t.pbuf));
+            buffer.push({ id: got.id, file: got.path, name: got.name, size, w: t.w, h: t.h, added: now - q.i, pv: !!t.pbuf });
             added.push(got.id);
           } catch (e) {
             console.warn('import failed', q.j.name, e);
@@ -176,7 +193,7 @@ export async function runImport(jobs: ImportJob[], openSingle: boolean) {
     store.set((s) => ({ photos: [...s.photos].sort((a, b) => b.added - a.added) }));
     const ok = added.length;
     if (!ok) toast(`Couldn't import: ${errors[0] ?? 'unknown error'}`);
-    else toast(errors.length ? `Imported ${ok} · ${errors.length} failed (HEIC/RAW aren't supported yet)` : `Imported ${ok} photo${ok === 1 ? '' : 's'}`);
+    else toast(errors.length ? `Imported ${ok} · ${errors.length} failed (RAW isn't supported yet)` : `Imported ${ok} photo${ok === 1 ? '' : 's'}`);
   } finally {
     importing = false;
     clearBusy();
@@ -212,7 +229,7 @@ export async function removePhotos(ids: string[]) {
     currentId: s.currentId && set.has(s.currentId) ? null : s.currentId,
     view: s.currentId && set.has(s.currentId) ? 'library' : s.view,
   });
-  await fsx.remove(victims.flatMap((p) => [p.file, paths.thumb(p.id), paths.editedThumb(p.id), paths.edit(p.id)]));
+  await fsx.remove(victims.flatMap((p) => [p.file, paths.thumb(p.id), paths.editedThumb(p.id), paths.preview(p.id), paths.edit(p.id)]));
   toast(`Removed ${victims.length}`);
 }
 
@@ -228,13 +245,37 @@ export function copyEdits(id: string) {
   toast('Edits copied');
 }
 
-export function pasteEdits(ids: string[]) {
+const PASTE_LABEL: Record<PasteMode, string> = { all: 'Edits', preset: 'Preset', tools: 'Tools' };
+
+/** all = look incl. preset (keeps framing) · preset = only preset + strength · tools = adjustments, keeps target's preset. */
+export function pasteEdits(ids: string[], mode: PasteMode = 'all') {
   const clip = store.get().clipboard;
-  if (!clip || !ids.length) return;
+  if (!clip) {
+    toast('Copy edits from a photo first');
+    return;
+  }
+  if (!ids.length) return;
+  if (mode === 'preset' && !clip.preset) {
+    toast('The copied photo has no preset');
+    return;
+  }
+  const fn = mode === 'preset' ? presetOf : mode === 'tools' ? toolsOf : withGeometryOf;
   const next: Record<string, EditState> = {};
-  for (const id of ids) next[id] = withGeometryOf(clip, getEdit(id));
+  for (const id of ids) next[id] = fn(clip, getEdit(id));
   commitMany(next);
-  toast(`Pasted to ${ids.length} photo${ids.length === 1 ? '' : 's'}`);
+  toast(`${PASTE_LABEL[mode]} pasted to ${ids.length} photo${ids.length === 1 ? '' : 's'}`);
+}
+
+/** Apply one preset to many photos, keeping their other edits. */
+export function applyPreset(ids: string[], preset: string | null) {
+  if (!ids.length) return;
+  const next: Record<string, EditState> = {};
+  for (const id of ids) {
+    const e = getEdit(id);
+    next[id] = { ...e, preset, strength: preset ? (e.preset === preset ? e.strength : 1) : e.strength };
+  }
+  commitMany(next);
+  toast(preset ? `Preset applied to ${ids.length} photo${ids.length === 1 ? '' : 's'}` : 'Preset removed');
 }
 
 export function resetEdits(ids: string[]) {

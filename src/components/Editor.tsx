@@ -7,9 +7,12 @@ import { Slider } from './Slider';
 import { SaveState, thumbUrl } from './common';
 import { begin, commit, getEdit, redo, setEdit, undo } from '../lib/history';
 import { copyEdits, openExport, pasteEdits, step, toggleFav } from '../lib/library';
+import { PasteMenu } from './Menus';
+import { copyImage, dragOutGesture, renderShareFile } from '../lib/share';
+import { drawHistogram } from '../lib/histogram';
 import { getLut, getLutSync, presetInfo } from '../lib/luts';
 import { refreshPreviews, setPreviewPhoto } from '../lib/previews';
-import { loadFull, pin, prefetch } from '../lib/sources';
+import { loadFull, loadPreview, pin, prefetch } from '../lib/sources';
 import { store, toast, useStore, visiblePhotos } from '../lib/store';
 import { getThumbBitmap } from '../lib/thumbs';
 import { ASPECTS, aspectPx, clamp, fitCrop, orientedDims, outputDims } from '../lib/geometry';
@@ -38,6 +41,19 @@ export function Editor() {
   const [compare, setCompare] = useState(false);
   const [zoom, setZoom] = useState<{ x: number; y: number } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [split, setSplit] = useState<number | null>(null);
+  const [showHist, setShowHist] = useState(() => {
+    try {
+      return localStorage.getItem('gs.hist') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const histRef = useRef<HTMLCanvasElement>(null);
+  const histAt = useRef(0);
+  const histTimer = useRef(0);
+  /** Which resolution tier is on the GPU for the current photo: 0 thumb, 1 preview, 2 full. */
+  const tier = useRef<{ id: string | null; level: 0 | 1 | 2; fullLoading: boolean }>({ id: null, level: 0, fullLoading: false });
 
   const stageRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -45,9 +61,10 @@ export function Editor() {
   const stripRef = useRef<HTMLDivElement>(null);
   const rRef = useRef<Renderer | null>(null);
   const viewRef = useRef<{ view: [number, number, number, number]; outW: number; outH: number }>({ view: [0, 0, 1, 1], outW: 1, outH: 1 });
-  const live = useRef({ edit, cropMode, compare, zoom, photo });
-  live.current = { edit, cropMode, compare, zoom, photo };
+  const live = useRef({ edit, cropMode, compare, zoom, photo, split, showHist });
+  live.current = { edit, cropMode, compare, zoom, photo, split, showHist };
   const raf = useRef(0);
+  const toggleHistRef = useRef<() => void>(() => undefined);
 
   const setTab = (t: Tab) => {
     setTabState(t);
@@ -93,7 +110,44 @@ export function Editor() {
     r.resize(Math.round(cssW) * dpr, Math.round(cssH) * dpr);
     const lut = getLutSync(e.preset);
     if (e.preset && !lut) void getLut(e.preset).then((l) => l && schedule());
-    r.render(e, lut, { crop, view, original: L.compare });
+    r.render(e, lut, { crop, view, original: L.compare, split: L.cropMode ? null : L.split });
+
+    // Histogram: must read the GL canvas in this same task. Throttled; a trailing update catches the final state.
+    if (L.showHist && histRef.current) {
+      const now = performance.now();
+      clearTimeout(histTimer.current);
+      if (now - histAt.current > 90) {
+        histAt.current = now;
+        drawHistogram(canvasRef.current!, histRef.current);
+      } else histTimer.current = window.setTimeout(() => schedule(), 120);
+    }
+
+    // Upgrade to full resolution only when the screen shows more detail than the loaded tier holds.
+    const t = tier.current;
+    if (t.id === L.photo.id && t.level === 1 && !t.fullLoading) {
+      const devPerSrc = r.canvas.width / view[2] / outW;
+      // Texture and photo.w are both unrotated, so this is the loaded fraction of full resolution.
+      const frac = r.srcW / L.photo.w;
+      if (devPerSrc > frac * 1.1 && frac < 0.999) {
+        t.fullLoading = true;
+        const pid = L.photo.id;
+        setLoading(true);
+        loadFull(pid)
+          .then((b) => {
+            if (tier.current.id !== pid || !rRef.current) return;
+            rRef.current.setImage(b);
+            tier.current.level = 2;
+            schedule();
+          })
+          .catch((err) => toast(`Couldn't load full resolution: ${err}`))
+          .finally(() => {
+            if (tier.current.id === pid) {
+              tier.current.fullLoading = false;
+              setLoading(false);
+            }
+          });
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -128,7 +182,7 @@ export function Editor() {
     };
   }, [schedule]);
 
-  // Load the photo: instant thumbnail first, then full resolution.
+  // Load the photo: instant thumbnail, then the ~2560px preview. Full res loads on demand in draw().
   useEffect(() => {
     if (!id) return;
     let alive = true;
@@ -136,34 +190,36 @@ export function Editor() {
     setPreviewPhoto(id);
     setZoom(null);
     setCropMode(false);
-    setLoading(true);
+    setLoading(false);
+    tier.current = { id, level: 0, fullLoading: false };
     (async () => {
       const r = rRef.current;
       if (!r) return;
-      let gotFull = false;
-      const full = loadFull(id).then((b) => {
-        gotFull = true;
+      let gotPreview = false;
+      const pv = loadPreview(id).then((b) => {
+        gotPreview = true;
         return b;
       });
       try {
         const t = await getThumbBitmap(id);
-        if (alive && !gotFull) {
+        if (alive && !gotPreview && tier.current.level === 0) {
           r.setImage(t);
           schedule();
         }
       } catch {
-        /* thumbnail missing: wait for full */
+        /* thumbnail missing: wait for preview */
       }
       try {
-        const b = await full;
-        if (!alive) return;
+        const b = await pv;
+        if (!alive || tier.current.level === 2) return;
         r.setImage(b);
+        const p = store.get().photos.find((x) => x.id === id);
+        tier.current.level = p && b.width >= p.w ? 2 : 1;
         schedule();
       } catch (e) {
         if (alive) toast(`Couldn't open this photo: ${e}`);
       }
       if (!alive) return;
-      setLoading(false);
       const l = visiblePhotos(store.get());
       const i = l.findIndex((p) => p.id === id);
       prefetch([l[i + 1]?.id, l[i - 1]?.id].filter(Boolean) as string[]);
@@ -174,8 +230,25 @@ export function Editor() {
     };
   }, [id, schedule]);
 
-  useEffect(() => schedule(), [edit, cropMode, compare, zoom, photo, schedule]);
+  useEffect(() => schedule(), [edit, cropMode, compare, zoom, photo, split, showHist, schedule]);
   useEffect(() => refreshPreviews(), [stored]);
+
+  // Keep a drag-out file warm for the current photo so dragging starts instantly.
+  useEffect(() => {
+    if (!id) return;
+    const t = window.setTimeout(() => void renderShareFile(id).catch(() => undefined), 900);
+    return () => clearTimeout(t);
+  }, [id, stored]);
+
+  const toggleHist = () =>
+    setShowHist((v) => {
+      try {
+        localStorage.setItem('gs.hist', v ? '0' : '1');
+      } catch {
+        /* ignore */
+      }
+      return !v;
+    });
 
   useEffect(() => {
     if (id && !photo) store.set({ view: 'library' });
@@ -193,7 +266,9 @@ export function Editor() {
       if (e.ctrlKey || e.metaKey) {
         if (k === 'z') e.shiftKey ? redo(cur) : undo(cur);
         else if (k === 'y') redo(cur);
+        else if (k === 'c' && e.shiftKey) void copyImage(cur);
         else if (k === 'c') copyEdits(cur);
+        else if (k === 'v' && e.shiftKey) pasteEdits([cur], 'preset');
         else if (k === 'e') openExport([cur]);
         else return;
         e.preventDefault();
@@ -215,6 +290,8 @@ export function Editor() {
       else if (k === 'z') setZoom((z) => (z ? null : { x: 0.5, y: 0.5 }));
       else if (k === 'f') toggleFav([cur]);
       else if (k === 'p') setTab('presets');
+      else if (k === 's') setSplit((v) => (v === null ? 0.5 : null));
+      else if (k === 'h') toggleHistRef.current();
       else if (k === 'e') setTab('edit');
     };
     const ku = (e: KeyboardEvent) => {
@@ -228,7 +305,22 @@ export function Editor() {
     };
   }, []);
 
+  toggleHistRef.current = toggleHist;
+
   if (!id || !photo) return null;
+
+  const onSplitDown = (ev: React.PointerEvent) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const rect = frameRef.current!.getBoundingClientRect();
+    const move = (e: PointerEvent) => setSplit(clamp((e.clientX - rect.left) / rect.width, 0.02, 0.98));
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
 
   const [W, H] = orientedDims(edit.rotate, photo.w, photo.h);
   const ratioPx = aspectPx(edit.aspect, W, H);
@@ -312,8 +404,14 @@ export function Editor() {
           >
             ◐
           </button>
+          <button className={`icon${split !== null ? ' on' : ''}`} onClick={() => setSplit(split === null ? 0.5 : null)} title="Split before/after (S)">
+            ◧
+          </button>
           <button className={`icon${zoom ? ' on' : ''}`} onClick={() => setZoom(zoom ? null : { x: 0.5, y: 0.5 })} title="Zoom 100% (Z, or double-click)">
             1:1
+          </button>
+          <button className={`icon${showHist ? ' on' : ''}`} onClick={toggleHist} title="Histogram (H)">
+            ▁▃▆
           </button>
           <button className={`icon${photo.fav ? ' on' : ''}`} onClick={() => toggleFav([id])} title="Favorite (F)">
             {photo.fav ? '★' : '☆'}
@@ -322,10 +420,14 @@ export function Editor() {
         <div className="tb-right">
           <SaveState />
           <button className="ghost" onClick={() => copyEdits(id)} title="Copy edits (Ctrl+C)">
-            Copy
+            Copy edits
           </button>
-          <button className="ghost" disabled={!hasClip} onClick={() => pasteEdits([id])} title="Paste edits (Ctrl+V)">
-            Paste
+          <PasteMenu ids={() => [id]} className="ghost-pop" />
+          <button className="ghost" onClick={() => void copyImage(id)} title="Copy the edited image to paste anywhere (Ctrl+Shift+C)">
+            Copy image
+          </button>
+          <button className="drag-out" onPointerDown={(e) => dragOutGesture(e, () => [id])} title="Drag the edited photo into Discord, Instagram, a folder…">
+            ⠿ Drag out
           </button>
           <button className="ghost" disabled={!isEdited(edit)} onClick={() => commit(id, defaultEdit())} title="Revert to original">
             Revert
@@ -341,11 +443,19 @@ export function Editor() {
           <div className={`stage${zoom ? ' zoomed' : ''}`} ref={stageRef}>
             <div className="frame" ref={frameRef}>
               <canvas ref={canvasRef} onDoubleClick={onCanvasDouble} onPointerDown={onCanvasDown} />
+              {split !== null && !cropMode && (
+                <div className="split-line" style={{ left: `${split * 100}%` }} onPointerDown={onSplitDown}>
+                  <span className="split-knob">⇔</span>
+                  <span className="split-label l">Before</span>
+                  <span className="split-label r">After</span>
+                </div>
+              )}
               {cropMode && (
                 <CropOverlay crop={edit.crop} ratio={ratioPx ? ratioPx / (W / H) : null} onBegin={() => begin(id)} onChange={(c) => setEdit(id, { ...getEdit(id), crop: c })} />
               )}
             </div>
             {compare && <div className="badge">Original</div>}
+            {showHist && <canvas ref={histRef} className="histogram" width={240} height={110} />}
             {!compare && info && !cropMode && <div className="badge">{info.code}</div>}
           </div>
           <div className="filmstrip" ref={stripRef}>

@@ -3,6 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { bytesJob, pasteEdits, runImport, type ImportJob } from './library';
 import { store, toast, visiblePhotos } from './store';
+import { draggingOut } from './share';
 
 const IMG_URL = /\.(jpe?g|jfif|png|webp|avif|gif|bmp)(\?|#|$)/i;
 
@@ -138,7 +139,7 @@ function hasPayload(dt: DataTransfer | null) {
 export function installDropAndPaste() {
   let depth = 0;
   window.addEventListener('dragenter', (e) => {
-    if (!hasPayload(e.dataTransfer)) return;
+    if (!hasPayload(e.dataTransfer) || draggingOut) return;
     e.preventDefault();
     depth++;
     if (!store.get().dragOver) store.set({ dragOver: true });
@@ -156,7 +157,7 @@ export function installDropAndPaste() {
     e.preventDefault();
     depth = 0;
     store.set({ dragOver: false });
-    if (!e.dataTransfer || store.get().modal) return;
+    if (!e.dataTransfer || store.get().modal || draggingOut) return;
     const run = takeTransfer(e.dataTransfer);
     if (run) void run().catch((err) => toast(`Import failed: ${err}`));
     else toast("Couldn't find an image in that drop");

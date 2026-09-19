@@ -55,6 +55,9 @@ uniform float uExposure, uContrast, uHighlights, uShadows, uClarity, uSharpen, u
 uniform float uTemp, uTint, uSkin, uFade, uVignette, uGrain, uGrainSize;
 uniform vec4 uSplit;
 uniform vec3 uHsl[6];
+uniform sampler2D uCurve;
+uniform float uCurveOn;
+uniform float uSplitPos; // before/after divider in screen x; < 0 disables
 
 const vec3 LW = vec3(0.2126, 0.7152, 0.0722);
 
@@ -108,6 +111,7 @@ void main() {
   vec2 uv = clamp(uvRaw, 0.0, 1.0);
   vec2 dx = dFdx(uv), dy = dFdy(uv);
   vec3 col = texture(uSrc, uv).rgb;
+  vec3 col0 = col;
 
   if (uOriginal < 0.5) {
     if (uSharpen > 0.001) {
@@ -143,6 +147,12 @@ void main() {
     if (uLutAmt > 0.0) {
       vec3 lc = col * ((uLutSize - 1.0) / uLutSize) + 0.5 / uLutSize;
       col = mix(col, texture(uLut, lc).rgb, uLutAmt);
+    }
+
+    // Tone curve (master then per-channel, baked into a 256x1 texture).
+    if (uCurveOn > 0.5) {
+      vec3 cc = clamp(col, 0.0, 1.0) * (255.0 / 256.0) + 0.5 / 256.0;
+      col = vec3(texture(uCurve, vec2(cc.r, 0.5)).r, texture(uCurve, vec2(cc.g, 0.5)).g, texture(uCurve, vec2(cc.b, 0.5)).b);
     }
 
     // Saturation.
@@ -198,6 +208,7 @@ void main() {
     col += (hash(gl_FragCoord.xy) - 0.5) / 255.0;
   }
 
+  if (vUv.x < uSplitPos) col = col0;
   col = mix(vec3(0.055), clamp(col, 0.0, 1.0), inside);
   outColor = vec4(col, 1.0);
 }`;

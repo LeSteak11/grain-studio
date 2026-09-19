@@ -5,6 +5,24 @@ export interface Crop {
   h: number;
 }
 
+export type Pt = [number, number];
+
+export interface Curves {
+  rgb: Pt[];
+  r: Pt[];
+  g: Pt[];
+  b: Pt[];
+}
+
+export const IDENTITY_CURVE: Pt[] = [
+  [0, 0],
+  [1, 1],
+];
+
+export function isIdentityCurve(c: Pt[]): boolean {
+  return c.every(([x, y]) => Math.abs(x - y) < 1e-4);
+}
+
 export interface Photo {
   id: string;
   /** Absolute path of the library copy of the original. */
@@ -17,6 +35,8 @@ export interface Photo {
   fav?: boolean;
   /** Timestamp of the last edited-thumbnail render; 0/undefined = show the plain thumbnail. */
   rev?: number;
+  /** A ~2560px preview JPEG exists (fast editor open). */
+  pv?: boolean;
 }
 
 /** Non-destructive edit recipe. Tool values: bipolar -1..1, unipolar 0..1. */
@@ -43,6 +63,7 @@ export interface EditState {
   splitHighlight: number;
   /** 6 bands x [hue, saturation, lightness]. */
   hsl: number[];
+  curve: Curves;
   crop: Crop;
   aspect: string;
   rotate: number;
@@ -82,6 +103,7 @@ export const DEFAULT_EDIT: EditState = {
   splitHighlightHue: 0.08,
   splitHighlight: 0,
   hsl: new Array(18).fill(0),
+  curve: { rgb: IDENTITY_CURVE, r: IDENTITY_CURVE, g: IDENTITY_CURVE, b: IDENTITY_CURVE },
   crop: FULL_CROP,
   aspect: 'free',
   rotate: 0,
@@ -90,7 +112,7 @@ export const DEFAULT_EDIT: EditState = {
 };
 
 export function defaultEdit(): EditState {
-  return { ...DEFAULT_EDIT, hsl: new Array(18).fill(0), crop: { ...FULL_CROP } };
+  return { ...DEFAULT_EDIT, hsl: new Array(18).fill(0), curve: { ...DEFAULT_EDIT.curve }, crop: { ...FULL_CROP } };
 }
 
 export function normalizeEdit(raw: unknown): EditState {
@@ -103,6 +125,17 @@ export function normalizeEdit(raw: unknown): EditState {
   }
   out.preset = typeof r.preset === 'string' ? r.preset : null;
   out.hsl = Array.isArray(r.hsl) && r.hsl.length === 18 ? r.hsl.map(Number) : d.hsl;
+  const cv = r.curve as Record<string, unknown> | undefined;
+  const okPts = (v: unknown): v is Pt[] =>
+    Array.isArray(v) && v.length >= 2 && v.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === 'number'));
+  out.curve = cv
+    ? {
+        rgb: okPts(cv.rgb) ? cv.rgb : IDENTITY_CURVE,
+        r: okPts(cv.r) ? cv.r : IDENTITY_CURVE,
+        g: okPts(cv.g) ? cv.g : IDENTITY_CURVE,
+        b: okPts(cv.b) ? cv.b : IDENTITY_CURVE,
+      }
+    : d.curve;
   const c = r.crop as Crop | undefined;
   out.crop = c && [c.x, c.y, c.w, c.h].every((n) => typeof n === 'number') ? { x: c.x, y: c.y, w: c.w, h: c.h } : d.crop;
   return out as unknown as EditState;
@@ -118,12 +151,30 @@ export function hasGeometry(e: EditState): boolean {
   return e.rotate !== 0 || e.flip || e.straighten !== 0 || c.x !== 0 || c.y !== 0 || c.w !== 1 || c.h !== 1;
 }
 
+export function hasCurve(e: EditState): boolean {
+  const c = e.curve;
+  return !(isIdentityCurve(c.rgb) && isIdentityCurve(c.r) && isIdentityCurve(c.g) && isIdentityCurve(c.b));
+}
+
 export function isEdited(e?: EditState | null): boolean {
   if (!e) return false;
   if (e.preset) return true;
   if (TOOL_KEYS.some((k) => Math.abs(e[k]) > 1e-4)) return true;
   if (e.hsl.some((v) => Math.abs(v) > 1e-4)) return true;
+  if (hasCurve(e)) return true;
   return hasGeometry(e);
+}
+
+export type PasteMode = 'all' | 'preset' | 'tools';
+
+/** Preset-only paste: take src's preset + strength, keep everything else. */
+export function presetOf(src: EditState, target: EditState): EditState {
+  return { ...target, preset: src.preset, strength: src.strength };
+}
+
+/** Tools-only paste: src's adjustments, target's preset and framing. */
+export function toolsOf(src: EditState, target: EditState): EditState {
+  return { ...withGeometryOf(src, target), preset: target.preset, strength: target.strength };
 }
 
 /** Paste semantics: take the look from `src`, keep the target's framing. */

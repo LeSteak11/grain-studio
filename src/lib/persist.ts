@@ -13,6 +13,7 @@ const inflight = new Set<Promise<void>>();
 let lastEdits = store.get().edits;
 let lastPhotos = store.get().photos;
 let lastRecipes = store.get().recipes;
+let lastFavs = store.get().favPresets;
 
 function updateSaving() {
   const saving = timers.size > 0 || inflight.size > 0;
@@ -55,6 +56,10 @@ async function writeLibrary() {
   await fsx.writeText(paths.library(), JSON.stringify({ version: 1, photos: store.get().photos }));
 }
 
+async function writePrefs() {
+  await fsx.writeText(paths.prefs(), JSON.stringify({ favPresets: store.get().favPresets }));
+}
+
 async function writeRecipes() {
   await fsx.writeText(paths.recipes(), JSON.stringify(store.get().recipes, null, 1));
 }
@@ -65,6 +70,7 @@ function onChange() {
     lastEdits = s.edits;
     lastPhotos = s.photos;
     lastRecipes = s.recipes;
+    lastFavs = s.favPresets;
     return;
   }
   if (s.edits !== lastEdits) {
@@ -79,6 +85,10 @@ function onChange() {
   if (s.recipes !== lastRecipes) {
     lastRecipes = s.recipes;
     schedule('rec', LIB_DELAY, writeRecipes);
+  }
+  if (s.favPresets !== lastFavs) {
+    lastFavs = s.favPresets;
+    schedule('prefs', LIB_DELAY, writePrefs);
   }
 }
 

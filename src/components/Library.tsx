@@ -5,6 +5,24 @@ import { copyEdits, openEditor, openExport, pasteEdits, pickAndImport, removePho
 import { presetInfo } from '../lib/luts';
 import { store, useStore, visiblePhotos, type Filter } from '../lib/store';
 import { isEdited, type Photo } from '../lib/types';
+import { PasteMenu, PresetPicker } from './Menus';
+import { copyImage, dragOutGesture } from '../lib/share';
+
+/** Dragging a selected tile drags the whole selection; an unselected tile drags just itself. */
+function dragIds(id: string) {
+  const s = store.get();
+  if (!s.selection.has(id)) return [id];
+  return visiblePhotos(s)
+    .filter((p) => s.selection.has(p.id))
+    .map((p) => p.id);
+}
+
+function selectedIds() {
+  const s = store.get();
+  return visiblePhotos(s)
+    .filter((p) => s.selection.has(p.id))
+    .map((p) => p.id);
+}
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -39,7 +57,13 @@ function clickTile(e: React.MouseEvent, id: string) {
 
 const Tile = memo(function Tile({ photo, selected, edited, presetCode }: { photo: Photo; selected: boolean; edited: boolean; presetCode: string | null }) {
   return (
-    <div className={`tile${selected ? ' sel' : ''}`} onClick={(e) => clickTile(e, photo.id)} onDoubleClick={() => openEditor(photo.id)}>
+    <div
+      className={`tile${selected ? ' sel' : ''}`}
+      onClick={(e) => clickTile(e, photo.id)}
+      onDoubleClick={() => openEditor(photo.id)}
+      onPointerDown={(e) => !e.ctrlKey && !e.shiftKey && dragOutGesture(e, () => dragIds(photo.id))}
+      title="Double-click to edit · drag out to share"
+    >
       <img src={thumbUrl(photo)} loading="lazy" decoding="async" alt={photo.name} draggable={false} />
       <div className="tile-meta">
         {photo.fav && <span className="fav">★</span>}
@@ -56,7 +80,6 @@ export function Library() {
   const selection = useStore((s) => s.selection);
   const filter = useStore((s) => s.filter);
   const thumbSize = useStore((s) => s.thumbSize);
-  const hasClip = useStore((s) => !!s.clipboard);
 
   const selIds = photos.filter((p) => selection.has(p.id)).map((p) => p.id);
 
@@ -70,7 +93,9 @@ export function Library() {
       const k = e.key.toLowerCase();
       if (e.ctrlKey || e.metaKey) {
         if (k === 'a') store.set({ selection: new Set(list.map((p) => p.id)) });
+        else if (k === 'c' && e.shiftKey && sel.length === 1) void copyImage(sel[0]);
         else if (k === 'c' && sel.length) copyEdits(sel[0]);
+        else if (k === 'v' && e.shiftKey && sel.length) pasteEdits(sel, 'preset');
         else if (k === 'e' && sel.length) openExport(sel);
         else if (k === 'i') void pickAndImport();
         else return;
@@ -137,8 +162,10 @@ export function Library() {
         <button disabled={selIds.length !== 1} onClick={() => copyEdits(selIds[0])}>
           Copy edits
         </button>
-        <button disabled={!hasClip} onClick={() => pasteEdits(selIds)}>
-          Paste edits
+        <PasteMenu ids={selectedIds} />
+        <PresetPicker ids={selectedIds} />
+        <button disabled={selIds.length !== 1} onClick={() => void copyImage(selIds[0])} title="Copy the edited image (Ctrl+Shift+C)">
+          Copy image
         </button>
         <button onClick={() => toggleFav(selIds)}>Favorite</button>
         <button onClick={() => resetEdits(selIds)}>Revert</button>

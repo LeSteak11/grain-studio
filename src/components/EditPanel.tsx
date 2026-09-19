@@ -1,5 +1,6 @@
 import { useCallback, useState, type ReactNode } from 'react';
 import { Slider } from './Slider';
+import { CurveEditor } from './CurveEditor';
 import { begin, commit, getEdit, setEdit } from '../lib/history';
 import { DEFAULT_EDIT, HSL_BANDS, SPLIT_HUES, TOOL_SECTIONS, hueCss, type EditState, type NumKey } from '../lib/types';
 
@@ -85,6 +86,10 @@ export function EditPanel({ id, edit, onCrop }: Props) {
           ))}
         </SectionBox>
       ))}
+
+      <SectionBox title="Curves" closed={!!closed.Curves} onToggle={toggle}>
+        <CurveEditor id={id} edit={edit} />
+      </SectionBox>
 
       <SectionBox title="Split Tone" closed={!!closed['Split Tone']} onToggle={toggle}>
         {(

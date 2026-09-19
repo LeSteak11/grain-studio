@@ -1,6 +1,7 @@
 import { FRAG_BLUR, FRAG_LUMA, FRAG_MAIN, VERT } from './shaders';
 import { autoScale, orientedDims } from '../lib/geometry';
-import type { Crop, EditState } from '../lib/types';
+import { hasCurve, type Crop, type Curves, type EditState } from '../lib/types';
+import { spline } from '../lib/looks';
 import type { Lut } from '../lib/luts';
 
 type AnyCanvas = HTMLCanvasElement | OffscreenCanvas;
@@ -36,6 +37,26 @@ export interface RenderOpts {
   /** Sub-rect of the crop to show (zoom), in crop space. */
   view?: [number, number, number, number];
   original?: boolean;
+  /** Before/after divider (0..1 of the output width); left side shows the original. */
+  split?: number | null;
+}
+
+/** 256-entry RGB table: master curve then per-channel curve. */
+export function curveTable(c: Curves): Uint8Array {
+  const m = spline(c.rgb);
+  const fr = spline(c.r);
+  const fg = spline(c.g);
+  const fb = spline(c.b);
+  const q = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255)));
+  const out = new Uint8Array(256 * 4);
+  for (let i = 0; i < 256; i++) {
+    const x = m(i / 255);
+    out[i * 4] = q(fr(x));
+    out[i * 4 + 1] = q(fg(x));
+    out[i * 4 + 2] = q(fb(x));
+    out[i * 4 + 3] = 255;
+  }
+  return out;
 }
 
 /** GPU edit pipeline: one fragment pass per frame, plus a one-time blur per image for clarity. */
@@ -54,6 +75,8 @@ export class Renderer {
   private lutTex = new Map<Lut, WebGLTexture>();
   private identity: WebGLTexture;
   private aniso: EXT_texture_filter_anisotropic | null;
+  private curveTex: WebGLTexture;
+  private curveKey = '';
 
   constructor(canvas: AnyCanvas, preserve = false) {
     const gl = canvas.getContext('webgl2', {
@@ -74,6 +97,13 @@ export class Renderer {
     this.vao = gl.createVertexArray()!;
     this.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     this.aniso = gl.getExtension('EXT_texture_filter_anisotropic');
+    this.curveTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.curveTex);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, 256, 1);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     this.identity = this.makeLutTex({ size: 2, data: new Uint8Array([0, 0, 0, 255, 0, 0, 0, 255, 0, 255, 255, 0, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 255, 255]) });
   }
 
@@ -204,9 +234,23 @@ export class Renderer {
       this.lutTex.set(lut, tex);
     }
     gl.bindTexture(gl.TEXTURE_3D, tex);
+    const curveOn = hasCurve(e);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.curveTex);
+    if (curveOn) {
+      const key = JSON.stringify(e.curve);
+      if (key !== this.curveKey) {
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, curveTable(e.curve));
+        this.curveKey = key;
+      }
+    }
     gl.uniform1i(P.u('uSrc'), 0);
     gl.uniform1i(P.u('uBlur'), 1);
     gl.uniform1i(P.u('uLut'), 2);
+    gl.uniform1i(P.u('uCurve'), 3);
+    gl.uniform1f(P.u('uCurveOn'), curveOn ? 1 : 0);
+    gl.uniform1f(P.u('uSplitPos'), o.split ?? -1);
     gl.uniform1f(P.u('uLutSize'), lut ? lut.size : 2);
     gl.uniform1f(P.u('uLutAmt'), lut && e.preset ? e.strength : 0);
 

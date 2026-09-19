@@ -12,7 +12,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::Manager;
 
-const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "jfif", "png", "webp", "bmp", "gif", "avif"];
+mod heic;
+
+const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "jfif", "png", "webp", "bmp", "gif", "avif", "heic", "heif"];
+
+fn is_heic_ext(ext: &str) -> bool {
+    ext == "heic" || ext == "heif"
+}
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn err<E: std::fmt::Display>(e: E) -> String {
@@ -94,7 +100,7 @@ fn library_root(app: tauri::AppHandle) -> Result<String, String> {
         .or_else(|_| app.path().home_dir())
         .map_err(err)?;
     let root = base.join("Grain Studio");
-    for d in ["originals", "thumbs", "edits", "luts", "Exports"] {
+    for d in ["originals", "thumbs", "previews", "edits", "luts", "Exports", "drag"] {
         fs::create_dir_all(root.join(d)).map_err(err)?;
     }
     Ok(root.to_string_lossy().into_owned())
@@ -222,7 +228,9 @@ async fn import_files(paths: Vec<String>, dest: String, skip: Vec<String>) -> Re
             continue;
         }
         let id = format!("{base:x}{i:05x}");
-        let dst = Path::new(&dest).join(format!("{id}.{}", ext_of(f)));
+        let ext = ext_of(f);
+        let out_ext = if is_heic_ext(&ext) { "jpg".to_string() } else { ext };
+        let dst = Path::new(&dest).join(format!("{id}.{out_ext}"));
         let info = Imported { id, path: dst.to_string_lossy().into_owned(), name, size };
         jobs.push((f.clone(), dst, info));
     }
@@ -237,7 +245,13 @@ async fn import_files(paths: Vec<String>, dest: String, skip: Vec<String>) -> Re
             .map(|c| {
                 s.spawn(move || {
                     c.iter()
-                        .filter(|(src, dst, _)| fs::copy(src, dst).is_ok())
+                        .filter(|(src, dst, _)| {
+                            if is_heic_ext(&ext_of(src)) {
+                                heic::to_jpeg(src, dst).is_ok()
+                            } else {
+                                fs::copy(src, dst).is_ok()
+                            }
+                        })
                         .map(|(_, _, info)| Imported {
                             id: info.id.clone(),
                             path: info.path.clone(),
@@ -267,6 +281,25 @@ async fn rename_path(from: String, to: String) -> Result<(), String> {
         return Err("A file with that name already exists".into());
     }
     fs::rename(from, to).map_err(err)
+}
+
+/// Converts a HEIC file already inside the library (pasted/dropped bytes) to JPEG, removing the source.
+#[tauri::command]
+async fn convert_heic(src: String, dst: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let r = heic::to_jpeg(Path::new(&src), Path::new(&dst));
+        let _ = fs::remove_file(&src);
+        r
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Deletes the files inside a folder (used for the temporary drag-out folder).
+#[tauri::command]
+async fn clear_dir(path: String) -> Result<(), String> {
+    let _ = fs::remove_dir_all(&path);
+    fs::create_dir_all(&path).map_err(err)
 }
 
 /// Fetches an image URL dragged/pasted from a browser (native side = no CORS).
@@ -301,6 +334,7 @@ fn open_path(path: String) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_drag::init())
         .invoke_handler(tauri::generate_handler![
             library_root,
             read_text,
@@ -313,6 +347,8 @@ fn main() {
             remove_paths,
             rename_path,
             download_url,
+            convert_heic,
+            clear_dir,
             open_path
         ])
         .run(tauri::generate_context!())

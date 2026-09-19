@@ -1,11 +1,13 @@
-// Live preset thumbnails: the current photo rendered through every preset, drawn into small tile canvases.
+// Live preset thumbnails: the current photo rendered through each *visible* preset tile.
+// Tiles that already show the current state are skipped, so slider moves stay cheap.
 import { getLut } from './luts';
 import { outputDims } from './geometry';
 import { store } from './store';
 import { getThumbBitmap, withThumbRenderer } from './thumbs';
 import { DEFAULT_EDIT } from './types';
 
-const tiles = new Map<string, HTMLCanvasElement>();
+const tiles = new Map<HTMLCanvasElement, string>();
+const rendered = new WeakMap<HTMLCanvasElement, string>();
 let photoId: string | null = null;
 let timer = 0;
 let gen = 0;
@@ -16,13 +18,14 @@ function schedule(delay: number) {
   timer = window.setTimeout(() => void run(), delay);
 }
 
+/** Called when a tile scrolls into view. */
 export function registerTile(presetId: string, canvas: HTMLCanvasElement) {
-  tiles.set(presetId, canvas);
-  schedule(30);
+  tiles.set(canvas, presetId);
+  schedule(20);
 }
 
-export function unregisterTile(presetId: string, canvas: HTMLCanvasElement) {
-  if (tiles.get(presetId) === canvas) tiles.delete(presetId);
+export function unregisterTile(canvas: HTMLCanvasElement) {
+  tiles.delete(canvas);
 }
 
 export function setPreviewPhoto(id: string | null) {
@@ -47,9 +50,12 @@ async function run() {
     return;
   }
   const base = store.get().edits[id] ?? DEFAULT_EDIT;
+  const stateKey = `${id}|${JSON.stringify({ ...base, preset: null, strength: 1 })}`;
   let n = 0;
-  for (const [pid, canvas] of [...tiles]) {
+  for (const [canvas, pid] of [...tiles]) {
     if (my !== gen) return;
+    const key = `${pid}|${stateKey}`;
+    if (rendered.get(canvas) === key) continue;
     const lut = pid === 'none' ? null : await getLut(pid);
     if (my !== gen) return;
     await withThumbRenderer((r, setSrc) => {
@@ -69,6 +75,7 @@ async function run() {
       const w = cw / s;
       const h = ch / s;
       ctx.drawImage(r.canvas, (sw - w) / 2, (sh - h) / 2, w, h, 0, 0, cw, ch);
+      rendered.set(canvas, key);
     });
     if (++n % 6 === 0) await new Promise((res) => requestAnimationFrame(res));
   }

@@ -1,7 +1,7 @@
 // Built-in looks, baked procedurally into 3D LUTs at runtime (nothing copied from VSCO).
 import type { Lut } from './luts';
 
-type Pt = [number, number];
+import type { Pt } from './types';
 type V3 = [number, number, number];
 
 interface LookDef {
@@ -47,7 +47,7 @@ export const LOOK_DEFS: LookDef[] = [
 ];
 
 /** Monotone cubic (Fritsch–Carlson) through control points. */
-function spline(pts: Pt[]): (x: number) => number {
+export function spline(pts: Pt[]): (x: number) => number {
   const n = pts.length;
   const xs = pts.map((p) => p[0]);
   const ys = pts.map((p) => p[1]);
