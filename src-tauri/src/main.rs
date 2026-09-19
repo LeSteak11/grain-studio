@@ -295,6 +295,11 @@ async fn convert_heic(src: String, dst: String) -> Result<(), String> {
     .map_err(err)?
 }
 
+#[tauri::command]
+async fn path_exists(path: String) -> bool {
+    Path::new(&path).exists()
+}
+
 /// Deletes the files inside a folder (used for the temporary drag-out folder).
 #[tauri::command]
 async fn clear_dir(path: String) -> Result<(), String> {
@@ -349,6 +354,7 @@ fn main() {
             download_url,
             convert_heic,
             clear_dir,
+            path_exists,
             open_path
         ])
         .run(tauri::generate_context!())

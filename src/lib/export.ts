@@ -34,7 +34,7 @@ function getWorker() {
 let running = false;
 
 /** Renders in a worker so the editor stays responsive; reads the next file while the current one renders. */
-export async function exportPhotos(ids: string[], o: ExportOpts) {
+export async function exportPhotos(ids: string[], o: ExportOpts, names?: string[]) {
   if (running) {
     toast('An export is already running');
     return;
@@ -72,7 +72,8 @@ export async function exportPhotos(ids: string[], o: ExportOpts) {
         );
       });
       const ext = o.format === 'png' ? 'png' : 'jpg';
-      await fsx.writeBytes(join(o.dir, `${baseName(photo.name)}.${ext}`), new Uint8Array(out), true);
+      const base = names?.[i] || baseName(photo.name);
+      await fsx.writeBytes(join(o.dir, `${base}.${ext}`), new Uint8Array(out), true);
     } catch (err) {
       console.error('export failed', photo.name, err);
       failed++;

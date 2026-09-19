@@ -273,3 +273,13 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .drag-out:hover { border-color: var(--dim); background: var(--panel2); }
 .drag-out:active { cursor: grabbing; }
 .tile { cursor: grab; }
+
+/* Export naming */
+.name-row { display: flex; align-items: center; gap: 6px; }
+.name-row input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line2); border-radius: var(--r); color: var(--text); padding: 8px 10px; outline: none; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 13px; user-select: text; }
+.name-row input:focus { border-color: var(--dim); }
+.name-row .ext { color: var(--dim); font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; }
+.dice { padding: 7px 12px; border: 1px solid var(--line2); border-radius: var(--r); white-space: nowrap; }
+.dice:hover { background: var(--panel2); border-color: var(--dim); }
+.name-preview { margin-top: 7px; font-size: 12px; color: var(--faint); font-family: 'Cascadia Mono', Consolas, monospace; word-break: break-all; }
+.name-preview.warn { color: #f5b454; }

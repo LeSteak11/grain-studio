@@ -48,6 +48,7 @@ export const fsx = {
   openPath: (path: string) => invoke<void>('open_path', { path }),
   convertHeic: (src: string, dst: string) => invoke<void>('convert_heic', { src, dst }),
   clearDir: (path: string) => invoke<void>('clear_dir', { path }),
+  exists: (path: string) => invoke<boolean>('path_exists', { path }),
 };
 
 export function fileUrl(path: string, rev?: number): string {
