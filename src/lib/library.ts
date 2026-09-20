@@ -8,7 +8,7 @@ import { flushAll, startPersistence } from './persist';
 import { makeThumb, THUMB_CONCURRENCY } from './thumbgen';
 import { dropThumbBitmap } from './thumbs';
 import { dropFull } from './sources';
-import { defaultEdit, isEdited, normalizeEdit, presetOf, toolsOf, withGeometryOf, type EditState, type PasteMode, type Photo, type Recipe } from './types';
+import { DEFAULT_LABELS, defaultEdit, isEdited, normalizeEdit, presetOf, toolsOf, withGeometryOf, type EditState, type Group, type Label, type PasteMode, type Photo, type Recipe } from './types';
 
 export const IMAGE_EXTS = ['jpg', 'jpeg', 'jfif', 'png', 'webp', 'bmp', 'gif', 'avif', 'heic', 'heif'];
 
@@ -16,12 +16,13 @@ export async function initApp() {
   try {
     const root = await fsx.root();
     setRoot(root);
-    const [libTxt, editsRaw, recTxt, luts, prefsTxt] = await Promise.all([
+    const [libTxt, editsRaw, recTxt, luts, prefsTxt, collTxt] = await Promise.all([
       fsx.readText(paths.library()),
       fsx.readAllText(paths.editsDir(), 'json'),
       fsx.readText(paths.recipes()),
       fsx.listDir(paths.lutsDir(), 'cube'),
       fsx.readText(paths.prefs()),
+      fsx.readText(paths.collections()),
     ]);
     let photos: Photo[] = [];
     try {
@@ -50,8 +51,19 @@ export async function initApp() {
     } catch {
       favPresets = [];
     }
+    let labels: Label[] = DEFAULT_LABELS;
+    let groups: Group[] = [];
+    try {
+      if (collTxt) {
+        const c = JSON.parse(collTxt);
+        labels = Array.isArray(c.labels) ? c.labels : DEFAULT_LABELS;
+        groups = Array.isArray(c.groups) ? c.groups : [];
+      }
+    } catch {
+      /* keep defaults */
+    }
     startPersistence();
-    store.set({ ready: true, root, photos, edits, recipes, luts, favPresets });
+    store.set({ ready: true, root, photos, edits, recipes, luts, favPresets, labels, groups });
     void fsx.clearDir(paths.dragDir()).catch(() => undefined);
 
     installDropAndPaste();
@@ -91,11 +103,11 @@ export function sniffExt(b: Uint8Array): string | null {
 /** One thing to import: returns the library copy's id/path plus its bytes (for the thumbnail). */
 export interface ImportJob {
   name: string;
-  load: () => Promise<{ id: string; path: string; name: string; bytes: Uint8Array }>;
+  load: () => Promise<{ id: string; path: string; name: string; bytes: Uint8Array; created?: number }>;
 }
 
 /** Job for raw bytes (browser drag, clipboard, download): written into the library first. */
-export function bytesJob(name: string, getBytes: () => Promise<Uint8Array>): ImportJob {
+export function bytesJob(name: string, getBytes: () => Promise<Uint8Array>, created?: number): ImportJob {
   return {
     name,
     load: async () => {
@@ -109,11 +121,11 @@ export function bytesJob(name: string, getBytes: () => Promise<Uint8Array>): Imp
         const path = `${paths.originals()}\\${id}.jpg`;
         await fsx.writeBytes(tmp, bytes);
         await fsx.convertHeic(tmp, path);
-        return { id, path, name: `${base}.jpg`, bytes: await fsx.readBytes(path) };
+        return { id, path, name: `${base}.jpg`, bytes: await fsx.readBytes(path), created: created ?? Date.now() };
       }
       const path = `${paths.originals()}\\${id}.${ext}`;
       await fsx.writeBytes(path, bytes);
-      return { id, path, name: `${base}.${ext}`, bytes };
+      return { id, path, name: `${base}.${ext}`, bytes, created: created ?? Date.now() };
     },
   };
 }
@@ -133,7 +145,7 @@ export async function importPaths(input: string[]) {
       return;
     }
     await runImport(
-      items.map((it) => ({ name: it.name, load: async () => ({ id: it.id, path: it.path, name: it.name, bytes: await fsx.readBytes(it.path) }) })),
+      items.map((it) => ({ name: it.name, load: async () => ({ id: it.id, path: it.path, name: it.name, bytes: await fsx.readBytes(it.path), created: it.created }) })),
       false,
     );
   } catch (e) {
@@ -150,6 +162,7 @@ export async function runImport(jobs: ImportJob[], openSingle: boolean) {
   }
   if (!jobs.length) return;
   importing = true;
+  const intoGroupAtStart = store.get().filter.kind === 'group';
   const added: string[] = [];
   const errors: string[] = [];
   try {
@@ -165,6 +178,9 @@ export async function runImport(jobs: ImportJob[], openSingle: boolean) {
     setBusy('Importing', 0, jobs.length);
     const queue = jobs.map((j, i) => ({ j, i }));
     const now = Date.now();
+    // Importing while a group is open drops the new photos into that group.
+    const f = store.get().filter;
+    const intoGroup = f.kind === 'group' && f.value ? [f.value] : undefined;
     await Promise.all(
       Array.from({ length: THUMB_CONCURRENCY }, async () => {
         for (let q = queue.shift(); q; q = queue.shift()) {
@@ -176,7 +192,7 @@ export async function runImport(jobs: ImportJob[], openSingle: boolean) {
             const t = await makeThumb(got.bytes);
             await fsx.writeBytes(paths.thumb(got.id), new Uint8Array(t.buf));
             if (t.pbuf) await fsx.writeBytes(paths.preview(got.id), new Uint8Array(t.pbuf));
-            buffer.push({ id: got.id, file: got.path, name: got.name, size, w: t.w, h: t.h, added: now - q.i, pv: !!t.pbuf });
+            buffer.push({ id: got.id, file: got.path, name: got.name, size, w: t.w, h: t.h, added: now - q.i, pv: !!t.pbuf, created: got.created ?? now, groups: intoGroup });
             added.push(got.id);
           } catch (e) {
             console.warn('import failed', q.j.name, e);
@@ -199,7 +215,7 @@ export async function runImport(jobs: ImportJob[], openSingle: boolean) {
     clearBusy();
   }
   if (openSingle && added.length === 1) {
-    store.set({ filter: 'all' });
+    if (!intoGroupAtStart) store.set({ filter: { kind: 'all' }, search: '' });
     openEditor(added[0]);
   }
 }

@@ -3,6 +3,7 @@ import { Library } from './components/Library';
 import { Editor } from './components/Editor';
 import { ExportDialog } from './components/ExportDialog';
 import { PresetLab } from './components/PresetLab';
+import { PostPrompt } from './components/PostPrompt';
 import { initApp } from './lib/library';
 import { useStore } from './lib/store';
 
@@ -60,6 +61,7 @@ export default function App() {
       {modal === 'export' && <ExportDialog />}
       {modal === 'lab' && <PresetLab />}
       {dragOver && <div className="drop-hint">Drop to import</div>}
+      <PostPrompt />
       <Busy />
       <Toast />
     </>

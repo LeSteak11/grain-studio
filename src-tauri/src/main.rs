@@ -191,6 +191,17 @@ struct Imported {
     path: String,
     name: String,
     size: u64,
+    /// File creation time (ms since epoch), falling back to modified time.
+    created: u64,
+}
+
+fn file_created_ms(p: &Path) -> u64 {
+    fs::metadata(p)
+        .ok()
+        .and_then(|m| m.created().or_else(|_| m.modified()).ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_else(now_ms)
 }
 
 fn collect_images(p: &Path, out: &mut Vec<PathBuf>, depth: u32) {
@@ -231,7 +242,8 @@ async fn import_files(paths: Vec<String>, dest: String, skip: Vec<String>) -> Re
         let ext = ext_of(f);
         let out_ext = if is_heic_ext(&ext) { "jpg".to_string() } else { ext };
         let dst = Path::new(&dest).join(format!("{id}.{out_ext}"));
-        let info = Imported { id, path: dst.to_string_lossy().into_owned(), name, size };
+        let created = file_created_ms(f);
+        let info = Imported { id, path: dst.to_string_lossy().into_owned(), name, size, created };
         jobs.push((f.clone(), dst, info));
     }
     if jobs.is_empty() {
@@ -257,6 +269,7 @@ async fn import_files(paths: Vec<String>, dest: String, skip: Vec<String>) -> Re
                             path: info.path.clone(),
                             name: info.name.clone(),
                             size: info.size,
+                            created: info.created,
                         })
                         .collect::<Vec<_>>()
                 })

@@ -115,7 +115,11 @@ function takeTransfer(dt: DataTransfer): (() => Promise<void>) | null {
         return;
       }
       await runImport(
-        imgs.map((f) => bytesJob(f.name && f.name !== 'image.png' ? f.name : stamp('Pasted image'), async () => new Uint8Array(await f.arrayBuffer()))),
+        // Files from Explorer keep their own date; clipboard images get "now".
+        imgs.map((f) => {
+          const pasted = !f.name || f.name === 'image.png';
+          return bytesJob(pasted ? stamp('Pasted image') : f.name, async () => new Uint8Array(await f.arrayBuffer()), pasted ? Date.now() : f.lastModified || Date.now());
+        }),
         true,
       );
     };

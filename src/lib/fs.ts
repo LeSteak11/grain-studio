@@ -11,6 +11,7 @@ export const paths = {
   library: () => join(ROOT, 'library.json'),
   recipes: () => join(ROOT, 'recipes.json'),
   prefs: () => join(ROOT, 'prefs.json'),
+  collections: () => join(ROOT, 'collections.json'),
   originals: () => join(ROOT, 'originals'),
   editsDir: () => join(ROOT, 'edits'),
   edit: (id: string) => join(ROOT, 'edits', `${id}.json`),
@@ -29,6 +30,7 @@ export interface ImportedFile {
   path: string;
   name: string;
   size: number;
+  created: number;
 }
 
 export const fsx = {

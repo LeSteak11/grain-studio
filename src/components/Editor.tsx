@@ -8,6 +8,7 @@ import { SaveState, thumbUrl } from './common';
 import { begin, commit, getEdit, redo, setEdit, undo } from '../lib/history';
 import { copyEdits, openExport, pasteEdits, step, toggleFav } from '../lib/library';
 import { PasteMenu } from './Menus';
+import { InfoPanel } from './InfoPanel';
 import { copyImage, dragOutGesture, renderShareFile } from '../lib/share';
 import { drawHistogram } from '../lib/histogram';
 import { getLut, getLutSync, presetInfo } from '../lib/luts';
@@ -18,11 +19,12 @@ import { getThumbBitmap } from '../lib/thumbs';
 import { ASPECTS, aspectPx, clamp, fitCrop, orientedDims, outputDims } from '../lib/geometry';
 import { DEFAULT_EDIT, FULL_CROP, defaultEdit, isEdited, type EditState } from '../lib/types';
 
-type Tab = 'presets' | 'edit';
+type Tab = 'presets' | 'edit' | 'info';
 
 function readTab(): Tab {
   try {
-    return localStorage.getItem('gs.tab') === 'edit' ? 'edit' : 'presets';
+    const v = localStorage.getItem('gs.tab');
+    return v === 'edit' || v === 'info' ? v : 'presets';
   } catch {
     return 'presets';
   }
@@ -290,6 +292,7 @@ export function Editor() {
       else if (k === 'z') setZoom((z) => (z ? null : { x: 0.5, y: 0.5 }));
       else if (k === 'f') toggleFav([cur]);
       else if (k === 'p') setTab('presets');
+      else if (k === 'i') setTab('info');
       else if (k === 's') setSplit((v) => (v === null ? 0.5 : null));
       else if (k === 'h') toggleHistRef.current();
       else if (k === 'e') setTab('edit');
@@ -515,9 +518,18 @@ export function Editor() {
                 <button className={tab === 'edit' ? 'on' : ''} onClick={() => setTab('edit')}>
                   Edit
                 </button>
+                <button className={tab === 'info' ? 'on' : ''} onClick={() => setTab('info')}>
+                  Info
+                </button>
               </div>
               <div className="side-scroll">
-                {tab === 'presets' ? <PresetPanel id={id} edit={edit} /> : <EditPanel id={id} edit={edit} onCrop={() => setCropMode(true)} />}
+                {tab === 'presets' ? (
+                  <PresetPanel id={id} edit={edit} />
+                ) : tab === 'info' ? (
+                  <InfoPanel ids={[id]} embedded />
+                ) : (
+                  <EditPanel id={id} edit={edit} onCrop={() => setCropMode(true)} />
+                )}
               </div>
             </>
           )}

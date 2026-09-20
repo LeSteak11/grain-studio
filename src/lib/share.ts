@@ -97,8 +97,12 @@ export async function dragOut(ids: string[]) {
   if (!ids.length || draggingOut) return;
   draggingOut = true;
   try {
-    const files = await Promise.all(ids.slice(0, 40).map(renderShareFile));
-    await startDrag({ item: files, icon: iconPath(ids[0]) });
+    const dragged = ids.slice(0, 40);
+    const files = await Promise.all(dragged.map(renderShareFile));
+    await startDrag({ item: files, icon: iconPath(ids[0]) }, (payload) => {
+      // Dropped somewhere: offer to mark these as posted.
+      if (payload.result === 'Dropped') store.set({ postPrompt: { ids: dragged, at: Date.now() } });
+    });
   } catch (e) {
     toast(`Drag failed: ${e}`);
   } finally {

@@ -37,7 +37,49 @@ export interface Photo {
   rev?: number;
   /** A ~2560px preview JPEG exists (fast editor open). */
   pv?: boolean;
+  /** When the photo was made: file creation time, or the moment it was dragged/pasted in. */
+  created?: number;
+  tags?: string[];
+  /** Label ids. */
+  labels?: string[];
+  /** Group (album) ids. */
+  groups?: string[];
+  /** Platform -> when it was marked posted. */
+  posted?: Partial<Record<Platform, number>>;
+  /** Caption / notes. */
+  note?: string;
 }
+
+export type Platform = 'ig' | 'threads' | 'other';
+
+export const PLATFORMS: { id: Platform; label: string; short: string }[] = [
+  { id: 'ig', label: 'Instagram', short: 'IG' },
+  { id: 'threads', label: 'Threads', short: 'TH' },
+  { id: 'other', label: 'Other', short: '✓' },
+];
+
+export interface Label {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  created: number;
+}
+
+export const LABEL_COLORS = ['#f5a524', '#e5484d', '#46a758', '#3e7bfa', '#9b5de5', '#e93d82', '#12a594', '#8b8b86'];
+
+export const DEFAULT_LABELS: Label[] = [
+  { id: 'l-topost', name: 'To post', color: '#f5a524' },
+  { id: 'l-best', name: 'Best', color: '#46a758' },
+  { id: 'l-draft', name: 'Draft', color: '#3e7bfa' },
+];
+
+export const createdOf = (p: Photo) => p.created ?? p.added;
+export const isPosted = (p: Photo) => !!p.posted && Object.keys(p.posted).length > 0;
 
 /** Non-destructive edit recipe. Tool values: bipolar -1..1, unipolar 0..1. */
 export interface EditState {
