@@ -128,6 +128,7 @@ export interface EditState {
   splits: number[];
   mute: boolean;
   volume: number;
+  text: TextStyle;
   crop: Crop;
   aspect: string;
   rotate: number;
@@ -142,6 +143,43 @@ export interface Recipe {
   name: string;
   edit: EditState;
 }
+
+export interface TextStyle {
+  body: string;
+  font: string;
+  weight: number;
+  /** Cap height as a fraction of the output height. */
+  size: number;
+  color: string;
+  stroke: string;
+  /** Stroke thickness as a fraction of the font size. */
+  strokeW: number;
+  /** Centre of the text block, 0..1 of the frame. */
+  x: number;
+  y: number;
+  align: 'left' | 'center' | 'right';
+  caps: boolean;
+  opacity: number;
+  lineHeight: number;
+  shadow: number;
+}
+
+export const DEFAULT_TEXT: TextStyle = {
+  body: '',
+  font: 'Montserrat',
+  weight: 700,
+  size: 0.09,
+  color: '#ffffff',
+  stroke: '#000000',
+  strokeW: 0.14,
+  x: 0.5,
+  y: 0.82,
+  align: 'center',
+  caps: false,
+  opacity: 1,
+  lineHeight: 1.15,
+  shadow: 0,
+};
 
 export const FULL_CROP: Crop = { x: 0, y: 0, w: 1, h: 1 };
 
@@ -172,6 +210,7 @@ export const DEFAULT_EDIT: EditState = {
   splits: [],
   mute: false,
   volume: 1,
+  text: DEFAULT_TEXT,
   curve: { rgb: IDENTITY_CURVE, r: IDENTITY_CURVE, g: IDENTITY_CURVE, b: IDENTITY_CURVE },
   crop: FULL_CROP,
   aspect: 'free',
@@ -181,7 +220,7 @@ export const DEFAULT_EDIT: EditState = {
 };
 
 export function defaultEdit(): EditState {
-  return { ...DEFAULT_EDIT, hsl: new Array(18).fill(0), splits: [], curve: { ...DEFAULT_EDIT.curve }, crop: { ...FULL_CROP } };
+  return { ...DEFAULT_EDIT, hsl: new Array(18).fill(0), splits: [], text: { ...DEFAULT_TEXT }, curve: { ...DEFAULT_EDIT.curve }, crop: { ...FULL_CROP } };
 }
 
 export function normalizeEdit(raw: unknown): EditState {
@@ -194,6 +233,7 @@ export function normalizeEdit(raw: unknown): EditState {
   }
   out.preset = typeof r.preset === 'string' ? r.preset : null;
   out.hsl = Array.isArray(r.hsl) && r.hsl.length === 18 ? r.hsl.map(Number) : d.hsl;
+  out.text = r.text && typeof r.text === 'object' ? { ...DEFAULT_TEXT, ...(r.text as object) } : d.text;
   out.splits = Array.isArray(r.splits) ? r.splits.filter((n) => typeof n === 'number' && n > 0).sort((a, b) => a - b) : [];
   const cv = r.curve as Record<string, unknown> | undefined;
   const okPts = (v: unknown): v is Pt[] =>
@@ -237,6 +277,7 @@ export function isEdited(e?: EditState | null): boolean {
   if (TOOL_KEYS.some((k) => Math.abs(e[k]) > 1e-4)) return true;
   if (e.hsl.some((v) => Math.abs(v) > 1e-4)) return true;
   if (hasCurve(e)) return true;
+  if (e.text.body.trim()) return true;
   if (hasVideoEdit(e)) return true;
   return hasGeometry(e);
 }
@@ -258,6 +299,7 @@ export function withGeometryOf(src: EditState, target: EditState): EditState {
   return {
     ...src,
     hsl: [...src.hsl],
+    text: { ...src.text },
     // Trim points belong to the target clip, not the copied look.
     trimIn: target.trimIn,
     trimOut: target.trimOut,

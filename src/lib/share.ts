@@ -8,6 +8,7 @@ import { loadFull, loadPreview } from './sources';
 import { store, toast } from './store';
 import type { Photo } from './types';
 import { PREVIEW_EDGE } from './thumbgen';
+import { buildTextLayer, layerSize } from './textlayer';
 import { DEFAULT_EDIT, isEdited, isVideo, type EditState } from './types';
 import { renderVideo } from './videoexport';
 import { segmentsOf } from './video';
@@ -50,6 +51,8 @@ export async function renderShareBlob(id: string, type: 'image/jpeg' | 'image/pn
       srKey = key;
     }
     r.resize(ow * k, oh * k);
+    const [lw, lh] = layerSize(ow * k, oh * k, 4096);
+    r.setTextLayer(await buildTextLayer(e.text, lw, lh).catch(() => null));
     r.render(e, lut);
     return (r.canvas as OffscreenCanvas).convertToBlob({ type, quality: 0.93 });
   });

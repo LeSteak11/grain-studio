@@ -14,6 +14,7 @@ interface Job {
   size: number;
   type: string;
   quality: number;
+  text: ImageBitmap | null;
 }
 
 const ctx = self as unknown as {
@@ -41,6 +42,7 @@ ctx.onmessage = async (e) => {
     let k = j.size ? Math.min(1, j.size / Math.max(ow, oh)) : 1;
     k = Math.min(k, maxDim / Math.max(ow, oh));
     r.resize(ow * k, oh * k);
+    r.setTextLayer(j.text ?? null);
     r.render(j.edit, j.lut);
     const blob = await (r.canvas as OffscreenCanvas).convertToBlob({ type: j.type, quality: j.quality });
     const buf = await blob.arrayBuffer();

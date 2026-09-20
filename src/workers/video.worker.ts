@@ -19,6 +19,7 @@ interface Job {
   /** 0..1, scales the bitrate. */
   quality: number;
   audio: { channels: Float32Array[]; sampleRate: number } | null;
+  text: ImageBitmap | null;
 }
 
 const ctx = self as unknown as {
@@ -119,6 +120,7 @@ async function run(job: Job) {
     const W = Math.max(2, Math.round((ow * k) / 2) * 2);
     const H = Math.max(2, Math.round((oh * k) / 2) * 2);
     r.resize(W, H);
+    r.setTextLayer(job.text ?? null);
     const target = new ArrayBufferTarget();
     const muxer = new Muxer({
       target,

@@ -56,6 +56,8 @@ uniform float uTemp, uTint, uSkin, uFade, uVignette, uGrain, uGrainSize;
 uniform vec4 uSplit;
 uniform vec3 uHsl[6];
 uniform sampler2D uCurve;
+uniform sampler2D uText;
+uniform float uTextOn;
 uniform float uCurveOn;
 uniform float uSplitPos; // before/after divider in screen x; < 0 disables
 
@@ -203,6 +205,12 @@ void main() {
       float n = vnoise(gp) * 0.65 + vnoise(gp * 2.13 + 17.0) * 0.35 - 0.5;
       L = dot(col, LW);
       col += n * uGrain * 0.24 * (1.0 - 0.6 * abs(2.0 * L - 1.0));
+    }
+
+    // Text overlay, composited in the frame's own coordinates.
+    if (uTextOn > 0.5) {
+      vec4 t = texture(uText, q);
+      col = mix(col, t.rgb, clamp(t.a, 0.0, 1.0));
     }
 
     col += (hash(gl_FragCoord.xy) - 0.5) / 255.0;

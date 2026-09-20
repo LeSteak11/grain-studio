@@ -84,6 +84,7 @@ export class Renderer {
   private aniso: EXT_texture_filter_anisotropic | null;
   private curveTex: WebGLTexture;
   private curveKey = '';
+  private textTex: WebGLTexture | null = null;
 
   constructor(canvas: AnyCanvas, preserve = false) {
     const gl = canvas.getContext('webgl2', {
@@ -112,6 +113,28 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     this.identity = this.makeLutTex({ size: 2, data: new Uint8Array([0, 0, 0, 255, 0, 0, 0, 255, 0, 255, 255, 0, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 255, 255]) });
+  }
+
+  /** Upload (or clear) the text overlay layer. */
+  setTextLayer(bmp: ImageBitmap | null) {
+    const gl = this.gl;
+    if (this.textTex) {
+      gl.deleteTexture(this.textTex);
+      this.textTex = null;
+    }
+    if (!bmp) return;
+    const t = gl.createTexture()!;
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bmp);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.textTex = t;
+    bmp.close();
   }
 
   get hasImage() {
@@ -272,6 +295,10 @@ export class Renderer {
     gl.uniform1i(P.u('uBlur'), 1);
     gl.uniform1i(P.u('uLut'), 2);
     gl.uniform1i(P.u('uCurve'), 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.textTex);
+    gl.uniform1i(P.u('uText'), 4);
+    gl.uniform1f(P.u('uTextOn'), this.textTex && e.text.body.trim() ? 1 : 0);
     gl.uniform1f(P.u('uCurveOn'), curveOn ? 1 : 0);
     gl.uniform1f(P.u('uSplitPos'), o.split ?? -1);
     gl.uniform1f(P.u('uLutSize'), lut ? lut.size : 2);
@@ -317,6 +344,10 @@ export class Renderer {
     for (const t of this.targets) {
       gl.deleteTexture(t.tex);
       gl.deleteFramebuffer(t.fb);
+    }
+    if (this.textTex) {
+      gl.deleteTexture(this.textTex);
+      this.textTex = null;
     }
     for (const t of this.lutTex.values()) gl.deleteTexture(t);
     this.lutTex.clear();

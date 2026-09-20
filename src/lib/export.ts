@@ -4,6 +4,8 @@ import { clearBusy, setBusy, store, toast } from './store';
 import { DEFAULT_EDIT, isVideo } from './types';
 import { renderVideo } from './videoexport';
 import { segmentsOf } from './video';
+import { buildTextLayer, layerSize } from './textlayer';
+import { outputDims } from './geometry';
 
 export interface ExportOpts {
   dir: string;
@@ -88,11 +90,17 @@ export async function exportPhotos(ids: string[], o: ExportOpts, names?: string[
       const lut = await getLut(edit.preset);
       const id = ++seq;
       const buf = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer : bytes.slice().buffer;
+      const [ow, oh] = outputDims(edit, photo.w, photo.h);
+      const scale = o.size ? Math.min(1, o.size / Math.max(ow, oh)) : 1;
+      const [lw, lh] = layerSize(ow * scale, oh * scale, 4096);
+      const text = await buildTextLayer(edit.text, lw, lh).catch(() => null);
       const out = await new Promise<ArrayBuffer>((resolve, reject) => {
         pending.set(id, { resolve, reject });
+        const transfer: Transferable[] = [buf as ArrayBuffer];
+        if (text) transfer.push(text);
         getWorker().postMessage(
-          { id, bytes: buf, edit, lut, w: photo.w, h: photo.h, size: o.size, type: `image/${o.format}`, quality: o.quality },
-          [buf as ArrayBuffer],
+          { id, bytes: buf, edit, lut, w: photo.w, h: photo.h, size: o.size, type: `image/${o.format}`, quality: o.quality, text },
+          transfer,
         );
       });
       const ext = o.format === 'png' ? 'png' : 'jpg';

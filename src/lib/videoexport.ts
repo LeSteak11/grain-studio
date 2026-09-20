@@ -2,6 +2,8 @@
 import { fsx } from './fs';
 import { getLut } from './luts';
 import { audioSlice, segmentsOf } from './video';
+import { buildTextLayer, layerSize } from './textlayer';
+import { outputDims } from './geometry';
 import type { EditState, Photo } from './types';
 
 export interface VideoOpts {
@@ -49,12 +51,17 @@ export async function renderVideo(photo: Photo, edit: EditState, opts: VideoOpts
     const seg = segs[i];
     const audio = photo.audio && !edit.mute ? await audioSlice(bytes, seg.start, seg.end, edit.volume) : null;
     const id = ++seq;
+    const [ow, oh] = outputDims(edit, photo.w, photo.h);
+    const scale = opts.maxEdge ? Math.min(1, opts.maxEdge / Math.max(ow, oh)) : 1;
+    const [lw, lh] = layerSize(ow * scale, oh * scale, 4096);
+    const text = await buildTextLayer(edit.text, lw, lh).catch(() => null);
     const copy = bytes.slice().buffer; // the worker takes ownership of its copy
     const buf = await new Promise<ArrayBuffer>((resolve, reject) => {
       pending.set(id, { resolve, reject, onProgress: (p) => onProgress?.((i + p) / segs.length) });
       const transfer: Transferable[] = [copy];
       if (audio) for (const c of audio.channels) transfer.push(c.buffer);
-      getWorker().postMessage({ id, bytes: copy, edit, lut, start: seg.start, end: seg.end, maxEdge: opts.maxEdge, quality: opts.quality, audio }, transfer);
+      if (text) transfer.push(text);
+      getWorker().postMessage({ id, bytes: copy, edit, lut, start: seg.start, end: seg.end, maxEdge: opts.maxEdge, quality: opts.quality, audio, text }, transfer);
     });
     out.push(new Uint8Array(buf));
   }

@@ -20,6 +20,7 @@ import { ASPECTS, aspectPx, clamp, fitCrop, orientedDims, outputDims } from '../
 import { DEFAULT_EDIT, FULL_CROP, defaultEdit, fmtTime, isEdited, isVideo, type EditState } from '../lib/types';
 import { VideoTimeline } from './VideoTimeline';
 import { segmentsOf } from '../lib/video';
+import { buildTextLayer, layerSize } from '../lib/textlayer';
 import { fsx, paths } from '../lib/fs';
 import { dropThumbBitmap } from '../lib/thumbs';
 
@@ -57,6 +58,11 @@ export function Editor() {
     }
   });
   const vidRef = useRef<HTMLVideoElement>(null);
+  /** Second decoder used only for timeline scrubbing, so playback isn't disturbed. */
+  const scrubRef = useRef<HTMLVideoElement>(null);
+  const scrubJob = useRef<{ t: number; c: HTMLCanvasElement } | null>(null);
+  const scrubBusy = useRef(false);
+  const [strip, setStrip] = useState<string[]>([]);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [loopOn, setLoopOn] = useState(true);
@@ -87,6 +93,8 @@ export function Editor() {
   const live = useRef({ edit, cropMode, compare, zoom, photo, split, showHist, isVid, trimOut, loopOn });
   live.current = { edit, cropMode, compare, zoom, photo, split, showHist, isVid, trimOut, loopOn };
   const raf = useRef(0);
+  /** Set while dragging the text, so the drag doesn't also toggle video playback. */
+  const dragged = useRef(false);
   const toggleHistRef = useRef<() => void>(() => undefined);
   const toggleZoomRef = useRef<() => void>(() => undefined);
   const togglePlayRef = useRef<() => void>(() => undefined);
@@ -319,6 +327,7 @@ export function Editor() {
         if (!alive) return;
         url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'video/mp4' }));
         v.src = url;
+        if (scrubRef.current) scrubRef.current.src = url;
         v.currentTime = store.get().edits[id]?.trimIn ?? 0;
       } catch (e) {
         if (alive) toast(`Couldn't open this clip: ${e}`);
@@ -331,9 +340,86 @@ export function Editor() {
       v.pause();
       v.removeAttribute('src');
       v.load();
+      const sv = scrubRef.current;
+      if (sv) {
+        sv.removeAttribute('src');
+        sv.load();
+      }
       if (url) URL.revokeObjectURL(url);
     };
   }, [id, isVid]);
+
+  // Filmstrip behind the timeline: a dozen frames grabbed once per clip.
+  useEffect(() => {
+    if (!id || !isVid) return;
+    let alive = true;
+    setStrip([]);
+    const v = scrubRef.current;
+    if (!v) return;
+    const seek = (t: number) =>
+      new Promise<void>((res) => {
+        const done = () => {
+          v.removeEventListener('seeked', done);
+          res();
+        };
+        v.addEventListener('seeked', done);
+        v.currentTime = t;
+      });
+    const build = async () => {
+      const total = store.get().photos.find((p) => p.id === id)?.dur ?? 0;
+      if (!total || !v.videoWidth) return;
+      const n = 12;
+      const out: string[] = [];
+      const c = document.createElement('canvas');
+      c.width = 160;
+      c.height = 90;
+      const ctx = c.getContext('2d')!;
+      for (let i = 0; i < n && alive; i++) {
+        await seek(((i + 0.5) / n) * total);
+        if (!alive) return;
+        const s = Math.max(c.width / v.videoWidth, c.height / v.videoHeight);
+        const w = c.width / s;
+        const h = c.height / s;
+        ctx.drawImage(v, (v.videoWidth - w) / 2, (v.videoHeight - h) / 2, w, h, 0, 0, c.width, c.height);
+        out.push(c.toDataURL('image/jpeg', 0.5));
+        if (alive) setStrip([...out]);
+      }
+    };
+    const onReady = () => void build();
+    if (v.readyState >= 2) onReady();
+    else v.addEventListener('loadeddata', onReady, { once: true });
+    return () => {
+      alive = false;
+      v.removeEventListener('loadeddata', onReady);
+    };
+  }, [id, isVid]);
+
+  /** Draw the frame at `t` into the timeline's hover bubble (one seek at a time). */
+  const drawPreview = useCallback((t: number, c: HTMLCanvasElement) => {
+    scrubJob.current = { t, c };
+    const pump = () => {
+      const v = scrubRef.current;
+      const job = scrubJob.current;
+      if (!v || !job || scrubBusy.current || !v.videoWidth) return;
+      scrubBusy.current = true;
+      scrubJob.current = null;
+      const done = () => {
+        v.removeEventListener('seeked', done);
+        const ctx = job.c.getContext('2d');
+        if (ctx) {
+          const s = Math.max(job.c.width / v.videoWidth, job.c.height / v.videoHeight);
+          const w = job.c.width / s;
+          const h = job.c.height / s;
+          ctx.drawImage(v, (v.videoWidth - w) / 2, (v.videoHeight - h) / 2, w, h, 0, 0, job.c.width, job.c.height);
+        }
+        scrubBusy.current = false;
+        pump();
+      };
+      v.addEventListener('seeked', done);
+      v.currentTime = job.t;
+    };
+    pump();
+  }, []);
 
   /** Push the current video frame to the GPU and redraw. */
   const showFrame = useCallback(() => {
@@ -403,6 +489,27 @@ export function Editor() {
     v.muted = edit.mute;
     v.volume = Math.min(1, Math.max(0, edit.volume));
   }, [edit.mute, edit.volume]);
+
+  // Build the text overlay whenever the text or the frame shape changes.
+  useEffect(() => {
+    if (!photo) return;
+    let alive = true;
+    const timer = window.setTimeout(async () => {
+      const [ow, oh] = outputDims(edit, photo.w, photo.h);
+      const [lw, lh] = layerSize(ow, oh);
+      const bmp = await buildTextLayer(edit.text, lw, lh).catch(() => null);
+      if (!alive || !rRef.current) {
+        bmp?.close();
+        return;
+      }
+      rRef.current.setTextLayer(bmp);
+      schedule();
+    }, 90);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [edit.text, edit.crop, edit.rotate, edit.straighten, photo, schedule]);
 
   useEffect(() => schedule(), [edit, cropMode, compare, zoom, photo, split, showHist, schedule]);
   useEffect(() => refreshPreviews(), [stored]);
@@ -576,7 +683,37 @@ export function Editor() {
   };
 
   const onCanvasDown = (ev: React.PointerEvent) => {
-    if (!zoom || cropMode || ev.button !== 0) return;
+    if (cropMode || ev.button !== 0) return;
+    // With text on the frame (and not zoomed), dragging moves the text.
+    if (!zoom && edit.text.body.trim() && id) {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const relOf = (e: { clientX: number; clientY: number }) => ({
+        x: clamp((e.clientX - rect.left) / rect.width, 0, 1),
+        y: clamp((e.clientY - rect.top) / rect.height, 0, 1),
+      });
+      const start = relOf(ev);
+      const from = { x: edit.text.x, y: edit.text.y };
+      let moved = false;
+      begin(id);
+      const move = (e: PointerEvent) => {
+        const r2 = relOf(e);
+        if (!moved && Math.hypot(e.clientX - ev.clientX, e.clientY - ev.clientY) < 3) return;
+        moved = true;
+        dragged.current = true;
+        const e0 = getEdit(id);
+        setEdit(id, { ...e0, text: { ...e0.text, x: clamp(from.x + (r2.x - start.x), 0, 1), y: clamp(from.y + (r2.y - start.y), 0, 1) } });
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        if (moved) setTimeout(() => (dragged.current = false), 0);
+        else dragged.current = false;
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      return;
+    }
+    if (!zoom) return;
     const { view, outW, outH, fit } = viewRef.current;
     const start = { x: view[0] + view[2] / 2, y: view[1] + view[3] / 2 };
     const sx = ev.clientX;
@@ -701,7 +838,8 @@ export function Editor() {
           <div className={`stage${zoom ? ' zoomed' : ''}`} ref={stageRef}>
             <div className="frame" ref={frameRef}>
               <video ref={vidRef} className="hidden-video" muted={edit.mute} playsInline preload="auto" />
-              <canvas ref={canvasRef} onDoubleClick={isVid ? undefined : onCanvasDouble} onClick={isVid && !cropMode ? togglePlay : undefined} onPointerDown={onCanvasDown} />
+              <video ref={scrubRef} className="hidden-video" muted playsInline preload="auto" />
+              <canvas ref={canvasRef} onDoubleClick={isVid ? undefined : onCanvasDouble} onClick={isVid && !cropMode ? () => !dragged.current && togglePlay() : undefined} onPointerDown={onCanvasDown} />
               {split !== null && !cropMode && (
                 <div className="split-line" style={{ left: `${split * 100}%` }} onPointerDown={onSplitDown}>
                   <span className="split-knob">⇔</span>
@@ -775,7 +913,17 @@ export function Editor() {
                   setTime(t);
                 }}
                 onBegin={() => begin(id)}
-                onChange={(patch) => setEdit(id, { ...getEdit(id), ...patch })}
+                onChange={(patch) => {
+                  setEdit(id, { ...getEdit(id), ...patch });
+                  // Jump the big preview to whichever handle is moving.
+                  const t = patch.trimIn ?? patch.trimOut;
+                  if (t !== undefined) {
+                    seekTo(t);
+                    setTime(t);
+                  }
+                }}
+                strip={strip}
+                onPreview={drawPreview}
               />
             </div>
           )}

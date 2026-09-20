@@ -398,3 +398,29 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .tl-mark { position: absolute; transform: translateX(-50%); top: 0; width: 16px; height: 16px; border-radius: 50%; background: #2c2c2c; color: var(--dim); font-size: 11px; line-height: 1; }
 .tl-mark:hover { background: var(--danger); color: #111; }
 .tl-times { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* ---- Text overlay panel ---- */
+.textp .text-body { min-height: 56px; margin-bottom: 8px; }
+.row2 { display: flex; gap: 6px; margin-bottom: 8px; }
+.row2 > select { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line2); border-radius: var(--r); color: var(--text); padding: 7px 8px; outline: none; }
+.row2 > select:focus { border-color: var(--dim); }
+.row2 > .seg { flex: 1; }
+.small-seg button { padding: 6px 0; font-size: 12px; }
+.color-row { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
+.color-row > span { width: 54px; font-size: 12px; color: var(--dim); }
+.color-row input[type='color'] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line2); border-radius: var(--r); background: none; cursor: pointer; }
+.color-row .swatch { width: 18px; height: 18px; border-radius: 50%; }
+.anchors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 92px; margin: 6px 0 12px; }
+.anchors button { aspect-ratio: 1; border: 1px solid var(--line2); border-radius: 3px; }
+.anchors button:hover { background: var(--panel2); }
+.anchors button.on { background: var(--accent); border-color: var(--accent); }
+
+/* ---- Timeline scrubbing ---- */
+.tl-strip { position: absolute; inset: 0; display: flex; opacity: 0.55; pointer-events: none; }
+.tl-strip img { flex: 1; min-width: 0; height: 100%; object-fit: cover; display: block; }
+.tl-hoverline { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, 0.8); pointer-events: none; z-index: 3; }
+.tl-bubble { position: absolute; bottom: calc(100% - 42px); transform: translateX(-50%); z-index: 20; background: var(--panel2); border: 1px solid var(--line2); border-radius: 8px; padding: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6); opacity: 0; visibility: hidden; transition: opacity 0.08s; pointer-events: none; }
+.tl-bubble.show { opacity: 1; visibility: visible; }
+.tl-bubble canvas { display: block; width: 160px; height: 90px; border-radius: 4px; background: #000; }
+.tl-bubble span { display: block; text-align: center; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.timeline { position: relative; }
