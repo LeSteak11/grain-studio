@@ -1,59 +1,14 @@
-// Tags, labels, groups, dates and "posted" tracking. Everything lives on the Photo records
-// (library.json) plus label/group definitions (collections.json), autosaved like the rest.
+// Labels, groups, dates and "posted" tracking. Labels and groups live in collections.json
+// alongside the platforms you post to; everything else sits on the Photo records.
 import { ask } from '@tauri-apps/plugin-dialog';
 import { store, toast } from './store';
-import { LABEL_COLORS, type Group, type Label, type Photo, type Platform } from './types';
+import { LABEL_COLORS, shortFor, type Group, type Label, type Photo, type Platform } from './types';
 
 const uid = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 export function updatePhotos(ids: string[], fn: (p: Photo) => Photo) {
   const set = new Set(ids);
   store.set((s) => ({ photos: s.photos.map((p) => (set.has(p.id) ? fn(p) : p)) }));
-}
-
-export const cleanTag = (t: string) => t.trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 40);
-
-/** All tags in use, most used first. */
-export function allTags(photos: Photo[]): { tag: string; count: number }[] {
-  const m = new Map<string, { tag: string; count: number }>();
-  for (const p of photos)
-    for (const t of p.tags ?? []) {
-      const k = t.toLowerCase();
-      const e = m.get(k);
-      if (e) e.count++;
-      else m.set(k, { tag: t, count: 1 });
-    }
-  return [...m.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
-}
-
-export function addTags(ids: string[], raw: string) {
-  const tags = raw.split(',').map(cleanTag).filter(Boolean);
-  if (!tags.length) return;
-  // Reuse the existing spelling of a tag if there is one.
-  const known = new Map(allTags(store.get().photos).map((t) => [t.tag.toLowerCase(), t.tag]));
-  const final = tags.map((t) => known.get(t.toLowerCase()) ?? t);
-  updatePhotos(ids, (p) => {
-    const cur = p.tags ?? [];
-    const lower = new Set(cur.map((t) => t.toLowerCase()));
-    const add = final.filter((t) => !lower.has(t.toLowerCase()));
-    return add.length ? { ...p, tags: [...cur, ...add] } : p;
-  });
-}
-
-export function removeTag(ids: string[], tag: string) {
-  const k = tag.toLowerCase();
-  updatePhotos(ids, (p) => (p.tags?.some((t) => t.toLowerCase() === k) ? { ...p, tags: p.tags.filter((t) => t.toLowerCase() !== k) } : p));
-}
-
-export async function deleteTagEverywhere(tag: string) {
-  const ok = await ask(`Remove the tag “${tag}” from every photo?`, { title: 'Delete tag', kind: 'warning', okLabel: 'Delete' });
-  if (!ok) return;
-  removeTag(
-    store.get().photos.map((p) => p.id),
-    tag,
-  );
-  const f = store.get().filter;
-  if (f.kind === 'tag' && f.value?.toLowerCase() === tag.toLowerCase()) store.set({ filter: { kind: 'all' } });
 }
 
 /** Toggle membership (label or group) for many photos: if all have it, remove; otherwise add. */
@@ -102,13 +57,18 @@ export async function deleteGroup(id: string) {
   }));
 }
 
-export function createLabel(name: string): Label | null {
+/** Next unused colour from the palette. */
+export function nextLabelColor(): string {
+  const used = new Set(store.get().labels.map((l) => l.color));
+  return LABEL_COLORS.find((c) => !used.has(c)) ?? LABEL_COLORS[store.get().labels.length % LABEL_COLORS.length];
+}
+
+export function createLabel(name: string, color?: string, addIds: string[] = []): Label | null {
   const n = name.trim().slice(0, 30);
   if (!n) return null;
-  const used = new Set(store.get().labels.map((l) => l.color));
-  const color = LABEL_COLORS.find((c) => !used.has(c)) ?? LABEL_COLORS[store.get().labels.length % LABEL_COLORS.length];
-  const l: Label = { id: uid('l'), name: n, color };
+  const l: Label = { id: uid('l'), name: n, color: color ?? nextLabelColor() };
   store.set((s) => ({ labels: [...s.labels, l] }));
+  if (addIds.length) updatePhotos(addIds, (p) => ({ ...p, labels: [...(p.labels ?? []), l.id] }));
   return l;
 }
 
@@ -127,8 +87,48 @@ export async function deleteLabel(id: string) {
   }));
 }
 
-/** Mark/unmark posted on a platform. `on` undefined = toggle based on whether all already have it. */
-export function setPosted(ids: string[], platform: Platform, on?: boolean) {
+/* ---- Platforms you post to ---- */
+
+export function createPlatform(name: string): Platform | null {
+  const n = name.trim().slice(0, 24);
+  if (!n) return null;
+  if (store.get().platforms.some((p) => p.name.toLowerCase() === n.toLowerCase())) {
+    toast('That one is already in the list');
+    return null;
+  }
+  const p: Platform = { id: uid('p'), name: n, short: shortFor(n) };
+  store.set((s) => ({ platforms: [...s.platforms, p] }));
+  return p;
+}
+
+export function renamePlatform(id: string, name: string) {
+  const n = name.trim().slice(0, 24);
+  if (!n) return;
+  store.set((s) => ({ platforms: s.platforms.map((p) => (p.id === id ? { ...p, name: n, short: shortFor(n) } : p)) }));
+}
+
+export async function deletePlatform(id: string) {
+  const p = store.get().platforms.find((x) => x.id === id);
+  const used = store.get().photos.filter((x) => x.posted?.[id]).length;
+  const ok = await ask(
+    used ? `Remove “${p?.name}”? ${used} photo${used === 1 ? '' : 's'} marked as posted there will lose that mark.` : `Remove “${p?.name}” from the list?`,
+    { title: 'Remove platform', kind: 'warning', okLabel: 'Remove' },
+  );
+  if (!ok) return;
+  store.set((s) => ({
+    platforms: s.platforms.filter((x) => x.id !== id),
+    photos: s.photos.map((x) => {
+      if (!x.posted?.[id]) return x;
+      const posted = { ...x.posted };
+      delete posted[id];
+      return { ...x, posted };
+    }),
+    filter: s.filter.kind === 'posted' && s.filter.value === id ? { kind: 'all' } : s.filter,
+  }));
+}
+
+/** Mark/unmark posted. `on` undefined = toggle based on whether all already have it. */
+export function setPosted(ids: string[], platform: string, on?: boolean) {
   const set = new Set(ids);
   const photos = store.get().photos.filter((p) => set.has(p.id));
   const target = on ?? !photos.every((p) => p.posted?.[platform]);

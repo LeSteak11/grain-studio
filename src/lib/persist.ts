@@ -16,6 +16,7 @@ let lastRecipes = store.get().recipes;
 let lastFavs = store.get().favPresets;
 let lastLabels = store.get().labels;
 let lastGroups = store.get().groups;
+let lastPlatforms = store.get().platforms;
 
 function updateSaving() {
   const saving = timers.size > 0 || inflight.size > 0;
@@ -60,7 +61,7 @@ async function writeLibrary() {
 
 async function writeCollections() {
   const s = store.get();
-  await fsx.writeText(paths.collections(), JSON.stringify({ labels: s.labels, groups: s.groups }, null, 1));
+  await fsx.writeText(paths.collections(), JSON.stringify({ labels: s.labels, groups: s.groups, platforms: s.platforms }, null, 1));
 }
 
 async function writePrefs() {
@@ -80,6 +81,7 @@ function onChange() {
     lastFavs = s.favPresets;
     lastLabels = s.labels;
     lastGroups = s.groups;
+    lastPlatforms = s.platforms;
     return;
   }
   if (s.edits !== lastEdits) {
@@ -95,9 +97,10 @@ function onChange() {
     lastRecipes = s.recipes;
     schedule('rec', LIB_DELAY, writeRecipes);
   }
-  if (s.labels !== lastLabels || s.groups !== lastGroups) {
+  if (s.labels !== lastLabels || s.groups !== lastGroups || s.platforms !== lastPlatforms) {
     lastLabels = s.labels;
     lastGroups = s.groups;
+    lastPlatforms = s.platforms;
     schedule('coll', LIB_DELAY, writeCollections);
   }
   if (s.favPresets !== lastFavs) {

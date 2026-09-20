@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
-import { createdOf, isEdited, isPosted, type EditState, type Group, type Label, type Photo, type Platform, type Recipe } from './types';
+import { DEFAULT_PLATFORMS, createdOf, isEdited, isPosted, type EditState, type Group, type Label, type Photo, type Platform, type Recipe } from './types';
 
-export type FilterKind = 'all' | 'photos' | 'videos' | 'fav' | 'edited' | 'unedited' | 'posted' | 'unposted' | 'group' | 'label' | 'tag' | 'month' | 'untagged';
+export type FilterKind = 'all' | 'photos' | 'videos' | 'fav' | 'edited' | 'unedited' | 'posted' | 'unposted' | 'group' | 'label' | 'unlabeled' | 'month';
 export interface Filter {
   kind: FilterKind;
   value?: string;
@@ -40,6 +40,7 @@ export interface AppState {
   sort: Sort;
   labels: Label[];
   groups: Group[];
+  platforms: Platform[];
   postPrompt: PostPrompt | null;
   showInfo: boolean;
   thumbSize: number;
@@ -88,6 +89,7 @@ let state: AppState = {
   sort: readStr('gs.sort', ['created-desc', 'created-asc', 'added-desc', 'added-asc', 'name'], 'created-desc'),
   labels: [],
   groups: [],
+  platforms: DEFAULT_PLATFORMS,
   postPrompt: null,
   showInfo: readStr('gs.showInfo', ['1', '0'], '1') === '1',
   thumbSize: readNum('gs.thumbSize', 220),
@@ -155,17 +157,15 @@ function matchesFilter(s: AppState, p: Photo): boolean {
     case 'unedited':
       return !isEdited(s.edits[p.id]);
     case 'posted':
-      return f.value ? !!p.posted?.[f.value as Platform] : isPosted(p);
+      return f.value ? !!p.posted?.[f.value] : isPosted(p);
     case 'unposted':
       return !isPosted(p);
     case 'group':
       return !!p.groups?.includes(f.value!);
     case 'label':
       return !!p.labels?.includes(f.value!);
-    case 'tag':
-      return !!p.tags?.some((t) => t.toLowerCase() === f.value!.toLowerCase());
-    case 'untagged':
-      return !p.tags?.length;
+    case 'unlabeled':
+      return !p.labels?.length;
     case 'month':
       return monthKey(createdOf(p)) === f.value;
     default:
@@ -178,7 +178,6 @@ function matchesSearch(s: AppState, p: Photo, words: string[]): boolean {
   const hay = [
     p.name,
     p.note ?? '',
-    ...(p.tags ?? []),
     ...(p.labels ?? []).map((id) => s.labels.find((l) => l.id === id)?.name ?? ''),
     ...(p.groups ?? []).map((id) => s.groups.find((g) => g.id === id)?.name ?? ''),
   ]

@@ -39,13 +39,14 @@ export interface Photo {
   pv?: boolean;
   /** When the photo was made: file creation time, or the moment it was dragged/pasted in. */
   created?: number;
+  /** Old free-text tags; migrated into labels on load. */
   tags?: string[];
   /** Label ids. */
   labels?: string[];
   /** Group (album) ids. */
   groups?: string[];
-  /** Platform -> when it was marked posted. */
-  posted?: Partial<Record<Platform, number>>;
+  /** Platform id -> when it was marked posted. */
+  posted?: Record<string, number>;
   /** Caption / notes. */
   note?: string;
   /** Videos only. */
@@ -65,12 +66,45 @@ export function fmtTime(t: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export type Platform = 'ig' | 'threads' | 'other';
+/** A place you post to. The list is yours to edit. */
+export interface Platform {
+  id: string;
+  name: string;
+  /** 1-3 letters shown on the thumbnail. */
+  short: string;
+}
 
-export const PLATFORMS: { id: Platform; label: string; short: string }[] = [
-  { id: 'ig', label: 'Instagram', short: 'IG' },
-  { id: 'threads', label: 'Threads', short: 'TH' },
-  { id: 'other', label: 'Other', short: '✓' },
+const SHORTS: Record<string, string> = {
+  instagram: 'IG',
+  threads: 'TH',
+  tiktok: 'TT',
+  youtube: 'YT',
+  shorts: 'YT',
+  twitter: 'X',
+  x: 'X',
+  facebook: 'FB',
+  pinterest: 'PI',
+  snapchat: 'SC',
+  reddit: 'RD',
+  tumblr: 'TU',
+  linkedin: 'LI',
+  bluesky: 'BS',
+  discord: 'DC',
+  website: 'WW',
+  other: '✓',
+};
+
+export function shortFor(name: string): string {
+  const key = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (SHORTS[key]) return SHORTS[key];
+  const words = name.trim().split(/\s+/);
+  if (words.length > 1) return words.slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  return name.trim().slice(0, 2).toUpperCase() || '✓';
+}
+
+export const DEFAULT_PLATFORMS: Platform[] = [
+  { id: 'ig', name: 'Instagram', short: 'IG' },
+  { id: 'threads', name: 'Threads', short: 'TH' },
 ];
 
 export interface Label {
@@ -87,10 +121,10 @@ export interface Group {
 
 export const LABEL_COLORS = ['#f5a524', '#e5484d', '#46a758', '#3e7bfa', '#9b5de5', '#e93d82', '#12a594', '#8b8b86'];
 
+/** Starter labels. Posting status lives in its own section, so nothing here duplicates it. */
 export const DEFAULT_LABELS: Label[] = [
-  { id: 'l-topost', name: 'To post', color: '#f5a524' },
   { id: 'l-best', name: 'Best', color: '#46a758' },
-  { id: 'l-draft', name: 'Draft', color: '#3e7bfa' },
+  { id: 'l-edit', name: 'Needs work', color: '#f5a524' },
 ];
 
 export const createdOf = (p: Photo) => p.created ?? p.added;

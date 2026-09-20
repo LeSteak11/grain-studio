@@ -9,7 +9,25 @@ import { makeThumb, THUMB_CONCURRENCY } from './thumbgen';
 import { dropThumbBitmap } from './thumbs';
 import { dropFull } from './sources';
 import { VIDEO_EXTS, isVideoName, makeVideoThumb } from './video';
-import { DEFAULT_LABELS, defaultEdit, isEdited, normalizeEdit, presetOf, toolsOf, withGeometryOf, type EditState, type Group, type Label, type PasteMode, type Photo, type Recipe } from './types';
+import {
+  DEFAULT_LABELS,
+  DEFAULT_PLATFORMS,
+  LABEL_COLORS,
+  defaultEdit,
+  isEdited,
+  normalizeEdit,
+  presetOf,
+  shortFor,
+  toolsOf,
+  withGeometryOf,
+  type EditState,
+  type Group,
+  type Label,
+  type PasteMode,
+  type Photo,
+  type Platform,
+  type Recipe,
+} from './types';
 
 export const IMAGE_EXTS = ['jpg', 'jpeg', 'jfif', 'png', 'webp', 'bmp', 'gif', 'avif', 'heic', 'heif', ...VIDEO_EXTS];
 
@@ -54,17 +72,60 @@ export async function initApp() {
     }
     let labels: Label[] = DEFAULT_LABELS;
     let groups: Group[] = [];
+    let platforms: Platform[] = DEFAULT_PLATFORMS;
     try {
       if (collTxt) {
         const c = JSON.parse(collTxt);
         labels = Array.isArray(c.labels) ? c.labels : DEFAULT_LABELS;
         groups = Array.isArray(c.groups) ? c.groups : [];
+        if (Array.isArray(c.platforms) && c.platforms.length) platforms = c.platforms;
       }
     } catch {
       /* keep defaults */
     }
+
+    // Tags became labels: fold any old tags in, once.
+    const tagNames = new Set<string>();
+    for (const p of photos) for (const t of p.tags ?? []) if (t.trim()) tagNames.add(t.trim());
+    if (tagNames.size) {
+      const byName = new Map(labels.map((l) => [l.name.toLowerCase(), l]));
+      const added: Label[] = [];
+      for (const t of tagNames) {
+        if (byName.has(t.toLowerCase())) continue;
+        const l: Label = {
+          id: `l${Date.now().toString(36)}${added.length}`,
+          name: t.slice(0, 30),
+          color: LABEL_COLORS[(labels.length + added.length) % LABEL_COLORS.length],
+        };
+        added.push(l);
+        byName.set(t.toLowerCase(), l);
+      }
+      labels = [...labels, ...added];
+      photos = photos.map((p) => {
+        if (!p.tags?.length) return p;
+        const ids = new Set(p.labels ?? []);
+        for (const t of p.tags) {
+          const l = byName.get(t.trim().toLowerCase());
+          if (l) ids.add(l.id);
+        }
+        const { tags: _drop, ...rest } = p;
+        return { ...rest, labels: [...ids] };
+      });
+    }
+
+    // Any platform a photo was marked posted to must exist in the list.
+    const known = new Set(platforms.map((p) => p.id));
+    for (const p of photos) {
+      for (const k of Object.keys(p.posted ?? {})) {
+        if (known.has(k)) continue;
+        known.add(k);
+        const name = k === 'other' ? 'Other' : k.charAt(0).toUpperCase() + k.slice(1);
+        platforms = [...platforms, { id: k, name, short: shortFor(name) }];
+      }
+    }
+
     startPersistence();
-    store.set({ ready: true, root, photos, edits, recipes, luts, favPresets, labels, groups });
+    store.set({ ready: true, root, photos, edits, recipes, luts, favPresets, labels, groups, platforms });
     void fsx.clearDir(paths.dragDir()).catch(() => undefined);
 
     installDropAndPaste();

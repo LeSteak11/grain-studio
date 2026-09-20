@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
-import { addTags, allTags, createGroup, removeTag, setCreated, setNote, setPosted, toggleGroup, toggleLabel } from '../lib/organize';
+import { useState } from 'react';
+import { createGroup, createLabel, setCreated, setNote, setPosted, toggleGroup, toggleLabel } from '../lib/organize';
 import { store, useStore } from '../lib/store';
-import { PLATFORMS, createdOf, type Photo } from '../lib/types';
+import { createdOf, type Photo } from '../lib/types';
 
 const fmtDate = (t: number) => new Date(t).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const fmtShort = (t: number) => new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -12,65 +12,19 @@ function toLocalInput(t: number) {
   return d.toISOString().slice(0, 16);
 }
 
-function TagInput({ ids }: { ids: string[] }) {
-  const photos = useStore((s) => s.photos);
-  const [v, setV] = useState('');
-  const suggestions = useMemo(() => allTags(photos).slice(0, 200), [photos]);
-  const commit = () => {
-    if (v.trim()) addTags(ids, v);
-    setV('');
-  };
-  return (
-    <>
-      <input
-        className="tag-input"
-        list="gs-tags"
-        placeholder="Add tag, Enter to save"
-        value={v}
-        onChange={(e) => {
-          const val = e.target.value;
-          // Typing a comma finishes the tag.
-          if (val.includes(',')) {
-            addTags(ids, val);
-            setV('');
-          } else setV(val);
-        }}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit();
-          if (e.key === 'Escape') setV('');
-        }}
-      />
-      <datalist id="gs-tags">
-        {suggestions.map((t) => (
-          <option key={t.tag} value={t.tag} />
-        ))}
-      </datalist>
-    </>
-  );
-}
-
 export function InfoPanel({ ids, embedded }: { ids: string[]; embedded?: boolean }) {
   const photos = useStore((s) => s.photos);
   const labels = useStore((s) => s.labels);
   const groups = useStore((s) => s.groups);
+  const platforms = useStore((s) => s.platforms);
   const [newGroup, setNewGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [newLabel, setNewLabel] = useState(false);
+  const [labelName, setLabelName] = useState('');
 
   const sel: Photo[] = photos.filter((p) => ids.includes(p.id));
   if (!sel.length) return <div className="info empty-info">Select a photo to see its details.</div>;
   const one = sel.length === 1 ? sel[0] : null;
-
-  // Tags shared by every selected photo, plus tags only some have.
-  const tagCount = new Map<string, { tag: string; n: number }>();
-  for (const p of sel)
-    for (const t of p.tags ?? []) {
-      const k = t.toLowerCase();
-      const e = tagCount.get(k);
-      if (e) e.n++;
-      else tagCount.set(k, { tag: t, n: 1 });
-    }
-  const tags = [...tagCount.values()].sort((a, b) => b.n - a.n);
 
   const has = (key: 'labels' | 'groups', id: string) => {
     const n = sel.filter((p) => p[key]?.includes(id)).length;
@@ -114,33 +68,18 @@ export function InfoPanel({ ids, embedded }: { ids: string[]; embedded?: boolean
       <div className="info-sec">
         <span className="info-title">Posted</span>
         <div className="post-row">
-          {PLATFORMS.map((pl) => {
+          {platforms.map((pl) => {
             const n = sel.filter((p) => p.posted?.[pl.id]).length;
             const state = n === 0 ? '' : n === sel.length ? ' on' : ' some';
             return (
-              <button key={pl.id} className={`post-btn${state}`} onClick={() => setPosted(ids, pl.id)} title={one?.posted?.[pl.id] ? `Posted ${fmtDate(one.posted[pl.id]!)}` : `Mark as posted to ${pl.label}`}>
-                {pl.label}
+              <button key={pl.id} className={`post-btn${state}`} onClick={() => setPosted(ids, pl.id)} title={one?.posted?.[pl.id] ? `Posted ${fmtDate(one.posted[pl.id]!)}` : `Mark as posted to ${pl.name}`}>
+                {pl.name}
                 {one?.posted?.[pl.id] && <span className="when">{fmtShort(one.posted[pl.id]!)}</span>}
               </button>
             );
           })}
+          {!platforms.length && <p className="info-note">Add the places you post from the sidebar.</p>}
         </div>
-      </div>
-
-      <div className="info-sec">
-        <span className="info-title">Tags</span>
-        <div className="chips">
-          {tags.map((t) => (
-            <span key={t.tag} className={`chip${t.n < sel.length ? ' partial' : ''}`}>
-              #{t.tag}
-              {t.n < sel.length && <i>{t.n}</i>}
-              <button onClick={() => removeTag(ids, t.tag)} title="Remove tag">
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-        <TagInput ids={ids} />
       </div>
 
       <div className="info-sec">
@@ -155,8 +94,33 @@ export function InfoPanel({ ids, embedded }: { ids: string[]; embedded?: boolean
               </button>
             );
           })}
-          {!labels.length && <p className="info-note">Create labels in the sidebar.</p>}
+          {!labels.length && <p className="info-note">No labels yet — make one below.</p>}
         </div>
+        {newLabel ? (
+          <input
+            className="tag-input"
+            autoFocus
+            placeholder="Label name"
+            value={labelName}
+            onChange={(e) => setLabelName(e.target.value)}
+            onBlur={() => {
+              if (labelName.trim()) createLabel(labelName, undefined, ids);
+              setLabelName('');
+              setNewLabel(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              if (e.key === 'Escape') {
+                setLabelName('');
+                setNewLabel(false);
+              }
+            }}
+          />
+        ) : (
+          <button className="link" onClick={() => setNewLabel(true)}>
+            + New label for {sel.length === 1 ? 'this' : `these ${sel.length}`}
+          </button>
+        )}
       </div>
 
       <div className="info-sec">

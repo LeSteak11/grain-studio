@@ -6,10 +6,10 @@ import { InfoPanel } from './InfoPanel';
 import { fsx, paths } from '../lib/fs';
 import { copyEdits, openEditor, openExport, pasteEdits, pickAndImport, removePhotos, resetEdits, toggleFav } from '../lib/library';
 import { presetInfo } from '../lib/luts';
-import { addTags, setPosted, toggleGroup, toggleLabel } from '../lib/organize';
+import { createLabel, setPosted, toggleGroup, toggleLabel } from '../lib/organize';
 import { copyImage, dragOutGesture } from '../lib/share';
 import { dayKey, sortDate, store, useStore, visiblePhotos, type Sort } from '../lib/store';
-import { PLATFORMS, fmtTime, isEdited, isPosted, isVideo, type Label, type Photo } from '../lib/types';
+import { fmtTime, isEdited, isPosted, isVideo, type Label, type Photo, type Platform } from '../lib/types';
 import { durationOf } from '../lib/video';
 import { DEFAULT_EDIT } from '../lib/types';
 
@@ -61,7 +61,23 @@ function clickTile(e: React.MouseEvent, id: string) {
   store.set({ selection: new Set([id]), anchor: id });
 }
 
-const Tile = memo(function Tile({ photo, selected, edited, presetCode, labels, edit }: { photo: Photo; selected: boolean; edited: boolean; presetCode: string | null; labels: Label[]; edit?: import('../lib/types').EditState }) {
+const Tile = memo(function Tile({
+  photo,
+  selected,
+  edited,
+  presetCode,
+  labels,
+  platforms,
+  edit,
+}: {
+  photo: Photo;
+  selected: boolean;
+  edited: boolean;
+  presetCode: string | null;
+  labels: Label[];
+  platforms: Platform[];
+  edit?: import('../lib/types').EditState;
+}) {
   const dots = (photo.labels ?? []).map((id) => labels.find((l) => l.id === id)).filter(Boolean) as Label[];
   const posted = Object.keys(photo.posted ?? {});
   const video = isVideo(photo);
@@ -71,7 +87,7 @@ const Tile = memo(function Tile({ photo, selected, edited, presetCode, labels, e
       onClick={(e) => clickTile(e, photo.id)}
       onDoubleClick={() => openEditor(photo.id)}
       onPointerDown={(e) => !e.ctrlKey && !e.shiftKey && dragOutGesture(e, () => dragIds(photo.id))}
-      title={`${photo.name}${photo.tags?.length ? `\n#${photo.tags.join(' #')}` : ''}\nDouble-click to edit · drag out to share`}
+      title={`${photo.name}\nDouble-click to edit · drag out to share`}
     >
       <img src={thumbUrl(photo)} loading="lazy" decoding="async" alt={photo.name} draggable={false} />
       {video && (
@@ -85,11 +101,14 @@ const Tile = memo(function Tile({ photo, selected, edited, presetCode, labels, e
         {edited && <span className="edited">{presetCode ?? 'Edited'}</span>}
       </div>
       <div className="tile-marks">
-        {posted.map((p) => (
-          <span key={p} className="posted-mark" title={`Posted to ${PLATFORMS.find((x) => x.id === p)?.label}`}>
-            {PLATFORMS.find((x) => x.id === p)?.short}
-          </span>
-        ))}
+        {posted.map((p) => {
+          const pl = platforms.find((x) => x.id === p);
+          return pl ? (
+            <span key={p} className="posted-mark" title={`Posted to ${pl.name}`}>
+              {pl.short}
+            </span>
+          ) : null;
+        })}
         {dots.map((l) => (
           <span key={l.id} className="label-dot" style={{ background: l.color }} title={l.name} />
         ))}
@@ -105,6 +124,7 @@ export function Library() {
   const selection = useStore((s) => s.selection);
   const labels = useStore((s) => s.labels);
   const groups = useStore((s) => s.groups);
+  const platforms = useStore((s) => s.platforms);
   const thumbSize = useStore((s) => s.thumbSize);
   const search = useStore((s) => s.search);
   const sort = useStore((s) => s.sort);
@@ -212,8 +232,8 @@ export function Library() {
       ? (groups.find((g) => g.id === filter.value)?.name ?? 'Group')
       : filter.kind === 'label'
         ? (labels.find((l) => l.id === filter.value)?.name ?? 'Label')
-        : filter.kind === 'tag'
-          ? `#${filter.value}`
+        : filter.kind === 'posted' && filter.value
+          ? `Posted to ${platforms.find((p) => p.id === filter.value)?.name ?? ''}`
           : null;
 
   return (
@@ -289,14 +309,14 @@ export function Library() {
                   {g.name}
                 </button>
               ))}
-              <div className="menu-head">Add tag</div>
+              <div className="menu-head">New label</div>
               <input
                 className="tag-input"
-                placeholder="Tag, then Enter"
+                placeholder="Name, then Enter"
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return;
                   const v = (e.target as HTMLInputElement).value;
-                  if (v.trim()) addTags(selIds, v);
+                  if (v.trim()) createLabel(v, undefined, selIds);
                   (e.target as HTMLInputElement).value = '';
                   close();
                 }}
@@ -307,7 +327,7 @@ export function Library() {
         <Popover label="Posted ▾" title="Mark as posted">
           {(close) => (
             <div className="menu">
-              {PLATFORMS.map((p) => (
+              {platforms.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => {
@@ -315,12 +335,13 @@ export function Library() {
                     close();
                   }}
                 >
-                  Posted to {p.label}
+                  Posted to {p.name}
                 </button>
               ))}
+              {!platforms.length && <span className="menu-empty">Add platforms in the sidebar.</span>}
               <button
                 onClick={() => {
-                  PLATFORMS.forEach((p) => setPosted(selIds, p.id, false));
+                  platforms.forEach((p) => setPosted(selIds, p.id, false));
                   close();
                 }}
               >
@@ -379,7 +400,15 @@ export function Library() {
                   </div>
                 ) : (
                   <div key={r.id} data-tile={r.id} className="tile-cell" style={{ height: thumbSize }}>
-                    <Tile photo={r} selected={selection.has(r.id)} edited={isEdited(edits[r.id])} presetCode={presetInfo(edits[r.id]?.preset ?? null)?.code ?? null} labels={labels} edit={edits[r.id]} />
+                    <Tile
+                      photo={r}
+                      selected={selection.has(r.id)}
+                      edited={isEdited(edits[r.id])}
+                      presetCode={presetInfo(edits[r.id]?.preset ?? null)?.code ?? null}
+                      labels={labels}
+                      platforms={platforms}
+                      edit={edits[r.id]}
+                    />
                   </div>
                 ),
               )}
