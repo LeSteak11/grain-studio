@@ -8,9 +8,10 @@ import { flushAll, startPersistence } from './persist';
 import { makeThumb, THUMB_CONCURRENCY } from './thumbgen';
 import { dropThumbBitmap } from './thumbs';
 import { dropFull } from './sources';
+import { VIDEO_EXTS, isVideoName, makeVideoThumb } from './video';
 import { DEFAULT_LABELS, defaultEdit, isEdited, normalizeEdit, presetOf, toolsOf, withGeometryOf, type EditState, type Group, type Label, type PasteMode, type Photo, type Recipe } from './types';
 
-export const IMAGE_EXTS = ['jpg', 'jpeg', 'jfif', 'png', 'webp', 'bmp', 'gif', 'avif', 'heic', 'heif'];
+export const IMAGE_EXTS = ['jpg', 'jpeg', 'jfif', 'png', 'webp', 'bmp', 'gif', 'avif', 'heic', 'heif', ...VIDEO_EXTS];
 
 export async function initApp() {
   try {
@@ -97,6 +98,8 @@ export function sniffExt(b: Uint8Array): string | null {
   if (ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WEBP') return 'webp';
   if (ascii(b, 4, 8) === 'ftyp' && ascii(b, 8, 11) === 'avi') return 'avif';
   if (ascii(b, 4, 8) === 'ftyp' && ['heic', 'heix', 'hevc', 'heim', 'heis', 'mif1', 'msf1'].includes(ascii(b, 8, 12))) return 'heic';
+  if (ascii(b, 4, 8) === 'ftyp') return 'mp4';
+  if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return 'webm';
   return null;
 }
 
@@ -113,7 +116,7 @@ export function bytesJob(name: string, getBytes: () => Promise<Uint8Array>, crea
     load: async () => {
       const bytes = await getBytes();
       const ext = sniffExt(bytes);
-      if (!ext) throw new Error('not a supported image (JPEG, PNG, WebP, AVIF, GIF, BMP, HEIC)');
+      if (!ext) throw new Error('not a supported image or video');
       const id = `${Date.now().toString(16)}${(idSeq++ % 0xfffff).toString(16).padStart(5, '0')}`;
       const base = name.replace(/\.[a-z0-9]{2,5}$/i, '') || 'Image';
       if (ext === 'heic') {
@@ -189,6 +192,28 @@ export async function runImport(jobs: ImportJob[], openSingle: boolean) {
             const got = await q.j.load();
             written = got.path;
             const size = got.bytes.byteLength;
+            if (isVideoName(got.name)) {
+              const v = await makeVideoThumb(got.bytes);
+              await fsx.writeBytes(paths.thumb(got.id), new Uint8Array(v.buf));
+              buffer.push({
+                id: got.id,
+                file: got.path,
+                name: got.name,
+                size,
+                w: v.w,
+                h: v.h,
+                added: now - q.i,
+                created: got.created ?? now,
+                groups: intoGroup,
+                kind: 'video',
+                dur: v.dur,
+                audio: v.audio,
+              });
+              added.push(got.id);
+              done++;
+              setBusy('Importing', done, jobs.length);
+              continue;
+            }
             const t = await makeThumb(got.bytes);
             await fsx.writeBytes(paths.thumb(got.id), new Uint8Array(t.buf));
             if (t.pbuf) await fsx.writeBytes(paths.preview(got.id), new Uint8Array(t.pbuf));

@@ -48,6 +48,21 @@ export interface Photo {
   posted?: Partial<Record<Platform, number>>;
   /** Caption / notes. */
   note?: string;
+  /** Videos only. */
+  kind?: 'video';
+  /** Duration in seconds (videos). */
+  dur?: number;
+  /** The file has an audio track. */
+  audio?: boolean;
+}
+
+export const isVideo = (p: Photo) => p.kind === 'video';
+
+export function fmtTime(t: number): string {
+  if (!Number.isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 export type Platform = 'ig' | 'threads' | 'other';
@@ -106,6 +121,13 @@ export interface EditState {
   /** 6 bands x [hue, saturation, lightness]. */
   hsl: number[];
   curve: Curves;
+  /** Video trim, in seconds. trimOut 0 means "to the end". */
+  trimIn: number;
+  trimOut: number;
+  /** Split points in seconds, each starting a new clip. */
+  splits: number[];
+  mute: boolean;
+  volume: number;
   crop: Crop;
   aspect: string;
   rotate: number;
@@ -145,6 +167,11 @@ export const DEFAULT_EDIT: EditState = {
   splitHighlightHue: 0.08,
   splitHighlight: 0,
   hsl: new Array(18).fill(0),
+  trimIn: 0,
+  trimOut: 0,
+  splits: [],
+  mute: false,
+  volume: 1,
   curve: { rgb: IDENTITY_CURVE, r: IDENTITY_CURVE, g: IDENTITY_CURVE, b: IDENTITY_CURVE },
   crop: FULL_CROP,
   aspect: 'free',
@@ -154,7 +181,7 @@ export const DEFAULT_EDIT: EditState = {
 };
 
 export function defaultEdit(): EditState {
-  return { ...DEFAULT_EDIT, hsl: new Array(18).fill(0), curve: { ...DEFAULT_EDIT.curve }, crop: { ...FULL_CROP } };
+  return { ...DEFAULT_EDIT, hsl: new Array(18).fill(0), splits: [], curve: { ...DEFAULT_EDIT.curve }, crop: { ...FULL_CROP } };
 }
 
 export function normalizeEdit(raw: unknown): EditState {
@@ -167,6 +194,7 @@ export function normalizeEdit(raw: unknown): EditState {
   }
   out.preset = typeof r.preset === 'string' ? r.preset : null;
   out.hsl = Array.isArray(r.hsl) && r.hsl.length === 18 ? r.hsl.map(Number) : d.hsl;
+  out.splits = Array.isArray(r.splits) ? r.splits.filter((n) => typeof n === 'number' && n > 0).sort((a, b) => a - b) : [];
   const cv = r.curve as Record<string, unknown> | undefined;
   const okPts = (v: unknown): v is Pt[] =>
     Array.isArray(v) && v.length >= 2 && v.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === 'number'));
@@ -193,6 +221,11 @@ export function hasGeometry(e: EditState): boolean {
   return e.rotate !== 0 || e.flip || e.straighten !== 0 || c.x !== 0 || c.y !== 0 || c.w !== 1 || c.h !== 1;
 }
 
+/** Trim/split/mute changes count as edits for videos. */
+export function hasVideoEdit(e: EditState): boolean {
+  return e.trimIn > 0.001 || e.trimOut > 0.001 || e.splits.length > 0 || e.mute || e.volume !== 1;
+}
+
 export function hasCurve(e: EditState): boolean {
   const c = e.curve;
   return !(isIdentityCurve(c.rgb) && isIdentityCurve(c.r) && isIdentityCurve(c.g) && isIdentityCurve(c.b));
@@ -204,6 +237,7 @@ export function isEdited(e?: EditState | null): boolean {
   if (TOOL_KEYS.some((k) => Math.abs(e[k]) > 1e-4)) return true;
   if (e.hsl.some((v) => Math.abs(v) > 1e-4)) return true;
   if (hasCurve(e)) return true;
+  if (hasVideoEdit(e)) return true;
   return hasGeometry(e);
 }
 
@@ -224,6 +258,12 @@ export function withGeometryOf(src: EditState, target: EditState): EditState {
   return {
     ...src,
     hsl: [...src.hsl],
+    // Trim points belong to the target clip, not the copied look.
+    trimIn: target.trimIn,
+    trimOut: target.trimOut,
+    splits: [...target.splits],
+    mute: target.mute,
+    volume: target.volume,
     crop: { ...target.crop },
     aspect: target.aspect,
     rotate: target.rotate,

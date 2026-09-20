@@ -103,7 +103,9 @@ export function Sidebar() {
     let edited = 0;
     let posted = 0;
     let untagged = 0;
+    let videos = 0;
     for (const p of photos) {
+      if (p.kind === 'video') videos++;
       if (p.fav) fav++;
       if (isEdited(edits[p.id])) edited++;
       if (isPosted(p)) posted++;
@@ -115,7 +117,7 @@ export function Sidebar() {
       byMonth.set(m, (byMonth.get(m) ?? 0) + 1);
     }
     const months = [...byMonth.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-    return { byGroup, byLabel, byPlatform, months, fav, edited, posted, untagged, tags: allTags(photos) };
+    return { byGroup, byLabel, byPlatform, months, fav, edited, posted, untagged, videos, tags: allTags(photos) };
   }, [photos, edits]);
 
   const startEdit = (id: string, name: string) => {
@@ -146,6 +148,8 @@ export function Sidebar() {
     <nav className="sidebar">
       <Section title="Library" id="lib">
         <Item f={{ kind: 'all' }} label="All photos" count={photos.length} />
+        <Item f={{ kind: 'photos' }} label="Photos" count={photos.length - c.videos} />
+        <Item f={{ kind: 'videos' }} label="Videos" count={c.videos} />
         <Item f={{ kind: 'fav' }} label="Favorites" count={c.fav} />
         <Item f={{ kind: 'edited' }} label="Edited" count={c.edited} />
         <Item f={{ kind: 'unedited' }} label="Unedited" count={photos.length - c.edited} />

@@ -6,6 +6,7 @@ import { store, toast, visiblePhotos } from './store';
 import { draggingOut } from './share';
 
 const IMG_URL = /\.(jpe?g|jfif|png|webp|avif|gif|bmp)(\?|#|$)/i;
+const MEDIA_FILE = /\.(jpe?g|jfif|png|webp|avif|gif|bmp|heic|heif|mp4|m4v|mov|webm)$/i;
 
 function urlName(url: string): string {
   try {
@@ -90,7 +91,7 @@ async function walkEntry(entry: FileSystemEntry, out: File[], depth = 0): Promis
   }
 }
 
-const isImageFile = (f: File) => f.type.startsWith('image/') || IMG_URL.test(f.name);
+const isImageFile = (f: File) => f.type.startsWith('image/') || f.type.startsWith('video/') || MEDIA_FILE.test(f.name);
 
 /** Pulls everything out of a DataTransfer synchronously (it's wiped after the event), then imports. */
 function takeTransfer(dt: DataTransfer): (() => Promise<void>) | null {

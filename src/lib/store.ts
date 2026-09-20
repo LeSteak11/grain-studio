@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { createdOf, isEdited, isPosted, type EditState, type Group, type Label, type Photo, type Platform, type Recipe } from './types';
 
-export type FilterKind = 'all' | 'fav' | 'edited' | 'unedited' | 'posted' | 'unposted' | 'group' | 'label' | 'tag' | 'month' | 'untagged';
+export type FilterKind = 'all' | 'photos' | 'videos' | 'fav' | 'edited' | 'unedited' | 'posted' | 'unposted' | 'group' | 'label' | 'tag' | 'month' | 'untagged';
 export interface Filter {
   kind: FilterKind;
   value?: string;
@@ -144,6 +144,10 @@ export const sortDate = (s: AppState, p: Photo) => (s.sort.startsWith('added') ?
 function matchesFilter(s: AppState, p: Photo): boolean {
   const f = s.filter;
   switch (f.kind) {
+    case 'photos':
+      return p.kind !== 'video';
+    case 'videos':
+      return p.kind === 'video';
     case 'fav':
       return !!p.fav;
     case 'edited':

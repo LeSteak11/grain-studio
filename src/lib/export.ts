@@ -1,7 +1,9 @@
 import { baseName, fsx, join } from './fs';
 import { getLut } from './luts';
 import { clearBusy, setBusy, store, toast } from './store';
-import { DEFAULT_EDIT } from './types';
+import { DEFAULT_EDIT, isVideo } from './types';
+import { renderVideo } from './videoexport';
+import { segmentsOf } from './video';
 
 export interface ExportOpts {
   dir: string;
@@ -53,6 +55,28 @@ export async function exportPhotos(ids: string[], o: ExportOpts, names?: string[
     const photo = photoOf(ids[i]);
     const cur = next;
     next = read(ids[i + 1]);
+
+    // Videos go through the WebCodecs worker instead of the still-image path.
+    if (photo && isVideo(photo)) {
+      try {
+        const edit = store.get().edits[photo.id] ?? DEFAULT_EDIT;
+        const segs = segmentsOf(edit, photo.dur ?? 0).length;
+        const bufs = await renderVideo(photo, edit, { maxEdge: o.size, quality: o.quality }, (p) =>
+          setBusy(`Rendering ${photo.name}`, Math.round((done + p) * 10) / 10, ids.length),
+        );
+        const base = names?.[i] || baseName(photo.name);
+        for (let n = 0; n < bufs.length; n++) {
+          await fsx.writeBytes(join(o.dir, `${base}${segs > 1 ? `-${n + 1}` : ''}.mp4`), bufs[n], true);
+        }
+      } catch (err) {
+        console.error('video export failed', photo.name, err);
+        toast(`Couldn't render ${photo.name}: ${err instanceof Error ? err.message : err}`);
+        failed++;
+      }
+      done++;
+      setBusy('Exporting', done, ids.length);
+      continue;
+    }
     if (!photo || !cur) {
       failed++;
       done++;

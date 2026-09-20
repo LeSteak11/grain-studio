@@ -5,7 +5,14 @@ import { spline } from '../lib/looks';
 import type { Lut } from '../lib/luts';
 
 type AnyCanvas = HTMLCanvasElement | OffscreenCanvas;
-type ImgSource = ImageBitmap | HTMLCanvasElement | OffscreenCanvas | HTMLImageElement;
+type ImgSource = ImageBitmap | HTMLCanvasElement | OffscreenCanvas | HTMLImageElement | HTMLVideoElement | VideoFrame;
+
+function srcDims(s: ImgSource): [number, number] {
+  if (typeof HTMLVideoElement !== 'undefined' && s instanceof HTMLVideoElement) return [s.videoWidth, s.videoHeight];
+  if (typeof VideoFrame !== 'undefined' && s instanceof VideoFrame) return [s.displayWidth, s.displayHeight];
+  const e = s as { width: number; height: number };
+  return [e.width, e.height];
+}
 
 class Program {
   readonly p: WebGLProgram;
@@ -118,10 +125,26 @@ export class Renderer {
     if (this.canvas.height !== h) this.canvas.height = h;
   }
 
+  /** Upload a new video frame into the existing texture (cheaper than rebuilding it every frame). */
+  updateFrame(src: ImgSource) {
+    const [w, h] = srcDims(src);
+    if (!w || !h) return;
+    if (!this.src || w !== this.srcW || h !== this.srcH) {
+      this.setImage(src);
+      return;
+    }
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.src);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, src as TexImageSource);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    this.computeBlur();
+  }
+
   setImage(img: ImgSource) {
     const gl = this.gl;
-    const w = img.width;
-    const h = img.height;
+    const [w, h] = srcDims(img);
     if (this.src) gl.deleteTexture(this.src);
     const t = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, t);
@@ -130,7 +153,7 @@ export class Renderer {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, img as TexImageSource);
     gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -159,7 +182,7 @@ export class Renderer {
   }
 
   /** Low-res blurred luminance used for clarity. Sized relative to the image so preview == export. */
-  private computeBlur() {
+  computeBlur() {
     const gl = this.gl;
     for (const t of this.targets) {
       gl.deleteTexture(t.tex);

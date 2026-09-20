@@ -9,7 +9,9 @@ import { presetInfo } from '../lib/luts';
 import { addTags, setPosted, toggleGroup, toggleLabel } from '../lib/organize';
 import { copyImage, dragOutGesture } from '../lib/share';
 import { dayKey, sortDate, store, useStore, visiblePhotos, type Sort } from '../lib/store';
-import { PLATFORMS, isEdited, isPosted, type Label, type Photo } from '../lib/types';
+import { PLATFORMS, fmtTime, isEdited, isPosted, isVideo, type Label, type Photo } from '../lib/types';
+import { durationOf } from '../lib/video';
+import { DEFAULT_EDIT } from '../lib/types';
 
 const SORTS: { id: Sort; label: string }[] = [
   { id: 'created-desc', label: 'Newest first' },
@@ -59,9 +61,10 @@ function clickTile(e: React.MouseEvent, id: string) {
   store.set({ selection: new Set([id]), anchor: id });
 }
 
-const Tile = memo(function Tile({ photo, selected, edited, presetCode, labels }: { photo: Photo; selected: boolean; edited: boolean; presetCode: string | null; labels: Label[] }) {
+const Tile = memo(function Tile({ photo, selected, edited, presetCode, labels, edit }: { photo: Photo; selected: boolean; edited: boolean; presetCode: string | null; labels: Label[]; edit?: import('../lib/types').EditState }) {
   const dots = (photo.labels ?? []).map((id) => labels.find((l) => l.id === id)).filter(Boolean) as Label[];
   const posted = Object.keys(photo.posted ?? {});
+  const video = isVideo(photo);
   return (
     <div
       className={`tile${selected ? ' sel' : ''}`}
@@ -71,6 +74,12 @@ const Tile = memo(function Tile({ photo, selected, edited, presetCode, labels }:
       title={`${photo.name}${photo.tags?.length ? `\n#${photo.tags.join(' #')}` : ''}\nDouble-click to edit · drag out to share`}
     >
       <img src={thumbUrl(photo)} loading="lazy" decoding="async" alt={photo.name} draggable={false} />
+      {video && (
+        <div className="tile-video">
+          <span className="play">▶</span>
+          <span className="dur">{fmtTime(durationOf(photo, edit ?? DEFAULT_EDIT))}</span>
+        </div>
+      )}
       <div className="tile-meta">
         {photo.fav && <span className="fav">★</span>}
         {edited && <span className="edited">{presetCode ?? 'Edited'}</span>}
@@ -370,7 +379,7 @@ export function Library() {
                   </div>
                 ) : (
                   <div key={r.id} data-tile={r.id} className="tile-cell" style={{ height: thumbSize }}>
-                    <Tile photo={r} selected={selection.has(r.id)} edited={isEdited(edits[r.id])} presetCode={presetInfo(edits[r.id]?.preset ?? null)?.code ?? null} labels={labels} />
+                    <Tile photo={r} selected={selection.has(r.id)} edited={isEdited(edits[r.id])} presetCode={presetInfo(edits[r.id]?.preset ?? null)?.code ?? null} labels={labels} edit={edits[r.id]} />
                   </div>
                 ),
               )}

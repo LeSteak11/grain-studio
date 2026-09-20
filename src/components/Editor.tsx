@@ -17,7 +17,11 @@ import { loadFull, loadPreview, pin, prefetch } from '../lib/sources';
 import { store, toast, useStore, visiblePhotos } from '../lib/store';
 import { getThumbBitmap } from '../lib/thumbs';
 import { ASPECTS, aspectPx, clamp, fitCrop, orientedDims, outputDims } from '../lib/geometry';
-import { DEFAULT_EDIT, FULL_CROP, defaultEdit, isEdited, type EditState } from '../lib/types';
+import { DEFAULT_EDIT, FULL_CROP, defaultEdit, fmtTime, isEdited, isVideo, type EditState } from '../lib/types';
+import { VideoTimeline } from './VideoTimeline';
+import { segmentsOf } from '../lib/video';
+import { fsx, paths } from '../lib/fs';
+import { dropThumbBitmap } from '../lib/thumbs';
 
 type Tab = 'presets' | 'edit' | 'info';
 
@@ -52,6 +56,12 @@ export function Editor() {
       return false;
     }
   });
+  const vidRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const [loopOn, setLoopOn] = useState(true);
+  const vfc = useRef(0);
+  const lastTimeUi = useRef(0);
   const histRef = useRef<HTMLCanvasElement>(null);
   const histAt = useRef(0);
   const histTimer = useRef(0);
@@ -71,11 +81,18 @@ export function Editor() {
     bw: 1,
     bh: 1,
   });
-  const live = useRef({ edit, cropMode, compare, zoom, photo, split, showHist });
-  live.current = { edit, cropMode, compare, zoom, photo, split, showHist };
+  const isVid = !!photo && isVideo(photo);
+  const dur = photo?.dur ?? 0;
+  const trimOut = edit.trimOut > 0.001 ? Math.min(edit.trimOut, dur) : dur;
+  const live = useRef({ edit, cropMode, compare, zoom, photo, split, showHist, isVid, trimOut, loopOn });
+  live.current = { edit, cropMode, compare, zoom, photo, split, showHist, isVid, trimOut, loopOn };
   const raf = useRef(0);
   const toggleHistRef = useRef<() => void>(() => undefined);
   const toggleZoomRef = useRef<() => void>(() => undefined);
+  const togglePlayRef = useRef<() => void>(() => undefined);
+  const seekRef = useRef<(d: number) => void>(() => undefined);
+  const muteRef = useRef<() => void>(() => undefined);
+  const splitRef = useRef<() => void>(() => undefined);
   const zoomByRef = useRef<(f: number) => void>(() => undefined);
 
   const setTab = (t: Tab) => {
@@ -247,6 +264,7 @@ export function Editor() {
     setCropMode(false);
     setLoading(false);
     tier.current = { id, level: 0, fullLoading: false };
+    if (store.get().photos.find((p) => p.id === id)?.kind === 'video') return;
     (async () => {
       const r = rRef.current;
       if (!r) return;
@@ -284,6 +302,107 @@ export function Editor() {
       alive = false;
     };
   }, [id, schedule]);
+
+  // Video: load the file as a blob URL (same-origin, so WebGL can read its frames).
+  useEffect(() => {
+    if (!id || !isVid) return;
+    let alive = true;
+    let url = '';
+    setPlaying(false);
+    setTime(0);
+    setLoading(true);
+    const v = vidRef.current;
+    if (!v) return;
+    (async () => {
+      try {
+        const bytes = await fsx.readBytes(store.get().photos.find((p) => p.id === id)!.file);
+        if (!alive) return;
+        url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'video/mp4' }));
+        v.src = url;
+        v.currentTime = store.get().edits[id]?.trimIn ?? 0;
+      } catch (e) {
+        if (alive) toast(`Couldn't open this clip: ${e}`);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [id, isVid]);
+
+  /** Push the current video frame to the GPU and redraw. */
+  const showFrame = useCallback(() => {
+    const v = vidRef.current;
+    const r = rRef.current;
+    if (!v || !r || !v.videoWidth) return;
+    r.updateFrame(v);
+    draw();
+  }, [draw]);
+
+  // Frame loop while playing, with trim bounds and looping.
+  useEffect(() => {
+    const v = vidRef.current;
+    if (!v || !isVid) return;
+    const tick = () => {
+      const L = live.current;
+      showFrame();
+      const now = performance.now();
+      if (now - lastTimeUi.current > 60) {
+        lastTimeUi.current = now;
+        setTime(v.currentTime);
+      }
+      if (v.currentTime >= L.trimOut - 0.02) {
+        if (L.loopOn) v.currentTime = L.edit.trimIn;
+        else {
+          v.pause();
+          setTime(v.currentTime);
+        }
+      }
+      vfc.current = v.requestVideoFrameCallback(tick);
+    };
+    const onPlay = () => {
+      setPlaying(true);
+      vfc.current = v.requestVideoFrameCallback(tick);
+    };
+    const onPause = () => {
+      setPlaying(false);
+      if (vfc.current) v.cancelVideoFrameCallback(vfc.current);
+      vfc.current = 0;
+    };
+    const onSeeked = () => {
+      showFrame();
+      setTime(v.currentTime);
+    };
+    const onMeta = () => {
+      showFrame();
+      setTime(v.currentTime);
+    };
+    v.addEventListener('play', onPlay);
+    v.addEventListener('pause', onPause);
+    v.addEventListener('seeked', onSeeked);
+    v.addEventListener('loadeddata', onMeta);
+    return () => {
+      v.removeEventListener('play', onPlay);
+      v.removeEventListener('pause', onPause);
+      v.removeEventListener('seeked', onSeeked);
+      v.removeEventListener('loadeddata', onMeta);
+      if (vfc.current) v.cancelVideoFrameCallback(vfc.current);
+      vfc.current = 0;
+    };
+  }, [isVid, showFrame]);
+
+  // Volume/mute follow the clip's settings.
+  useEffect(() => {
+    const v = vidRef.current;
+    if (!v) return;
+    v.muted = edit.mute;
+    v.volume = Math.min(1, Math.max(0, edit.volume));
+  }, [edit.mute, edit.volume]);
 
   useEffect(() => schedule(), [edit, cropMode, compare, zoom, photo, split, showHist, schedule]);
   useEffect(() => refreshPreviews(), [stored]);
@@ -349,6 +468,13 @@ export function Editor() {
       else if (k === 'f') toggleFav([cur]);
       else if (k === 'p') setTab('presets');
       else if (k === 'i') setTab('info');
+      else if (e.key === ' ' && live.current.isVid) {
+        e.preventDefault();
+        togglePlayRef.current();
+      } else if (k === 'm' && live.current.isVid) muteRef.current();
+      else if (k === 'j' && live.current.isVid) seekRef.current(-1);
+      else if (k === 'l' && live.current.isVid) seekRef.current(1);
+      else if (k === 'x' && live.current.isVid) splitRef.current();
       else if (k === 's') setSplit((v) => (v === null ? 0.5 : null));
       else if (k === 'h') toggleHistRef.current();
       else if (k === 'e') setTab('edit');
@@ -364,7 +490,56 @@ export function Editor() {
     };
   }, []);
 
+  const seekTo = (t: number) => {
+    const v = vidRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(0, Math.min(t, dur));
+  };
+  const togglePlay = () => {
+    const v = vidRef.current;
+    if (!v) return;
+    if (v.paused) {
+      if (v.currentTime >= trimOut - 0.02 || v.currentTime < edit.trimIn) v.currentTime = edit.trimIn;
+      void v.play().catch(() => undefined);
+    } else v.pause();
+  };
+  const splitHere = () => {
+    if (!id) return;
+    const t = vidRef.current?.currentTime ?? 0;
+    if (t <= edit.trimIn + 0.05 || t >= trimOut - 0.05) {
+      toast('Move the playhead into the clip first');
+      return;
+    }
+    if (edit.splits.some((x) => Math.abs(x - t) < 0.05)) return;
+    commit(id, { ...getEdit(id), splits: [...getEdit(id).splits, t].sort((a, b) => a - b) });
+  };
+  const setCover = async () => {
+    const r = rRef.current;
+    const p = photo;
+    if (!r || !p || !id) return;
+    try {
+      const c = document.createElement('canvas');
+      const k = Math.min(1, 720 / Math.max(r.canvas.width, r.canvas.height));
+      c.width = Math.max(1, Math.round(r.canvas.width * k));
+      c.height = Math.max(1, Math.round(r.canvas.height * k));
+      c.getContext('2d')!.drawImage(r.canvas as HTMLCanvasElement, 0, 0, c.width, c.height);
+      const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/jpeg', 0.88));
+      if (!blob) throw new Error('could not read the frame');
+      await fsx.writeBytes(paths.thumb(id), new Uint8Array(await blob.arrayBuffer()));
+      await fsx.remove([paths.editedThumb(id)]);
+      dropThumbBitmap(id);
+      store.set((s) => ({ photos: s.photos.map((x) => (x.id === id ? { ...x, rev: 0 } : x)) }));
+      toast('Cover frame updated');
+    } catch (e) {
+      toast(`Couldn't set the cover: ${e}`);
+    }
+  };
+
   toggleHistRef.current = toggleHist;
+  togglePlayRef.current = togglePlay;
+  seekRef.current = (d: number) => seekTo((vidRef.current?.currentTime ?? 0) + d);
+  muteRef.current = () => id && commit(id, { ...getEdit(id), mute: !getEdit(id).mute });
+  splitRef.current = splitHere;
   toggleZoomRef.current = () => (live.current.zoom ? setZoom(null) : zoomBy(zoom100()));
   zoomByRef.current = (f: number) => zoomBy(f);
 
@@ -450,6 +625,7 @@ export function Editor() {
           <span className="dim">
             {index + 1} / {list.length}
           </span>
+          {isVid && segmentsOf(edit, dur).length > 1 && <span className="dim">· {segmentsOf(edit, dur).length} clips</span>}
           {loading && <span className="dim pulse">loading full res…</span>}
         </div>
         <div className="tb-center">
@@ -524,7 +700,8 @@ export function Editor() {
         <div className="stage-col">
           <div className={`stage${zoom ? ' zoomed' : ''}`} ref={stageRef}>
             <div className="frame" ref={frameRef}>
-              <canvas ref={canvasRef} onDoubleClick={onCanvasDouble} onPointerDown={onCanvasDown} />
+              <video ref={vidRef} className="hidden-video" muted={edit.mute} playsInline preload="auto" />
+              <canvas ref={canvasRef} onDoubleClick={isVid ? undefined : onCanvasDouble} onClick={isVid && !cropMode ? togglePlay : undefined} onPointerDown={onCanvasDown} />
               {split !== null && !cropMode && (
                 <div className="split-line" style={{ left: `${split * 100}%` }} onPointerDown={onSplitDown}>
                   <span className="split-knob">⇔</span>
@@ -540,6 +717,68 @@ export function Editor() {
             {showHist && <canvas ref={histRef} className="histogram" width={240} height={110} />}
             {!compare && info && !cropMode && <div className="badge">{info.code}</div>}
           </div>
+          {isVid && !cropMode && (
+            <div className="video-bar">
+              <div className="transport">
+                <button className="icon play" onClick={togglePlay} title="Play / pause (Space)">
+                  {playing ? '❚❚' : '▶'}
+                </button>
+                <span className="tl-clock">
+                  {fmtTime(time)} <span className="dim">/ {fmtTime(dur)}</span>
+                </span>
+                <button className={`icon${loopOn ? ' on' : ''}`} onClick={() => setLoopOn(!loopOn)} title="Loop the trimmed range">
+                  ↻
+                </button>
+                <button className={`icon${edit.mute ? ' on' : ''}`} onClick={() => commit(id, { ...getEdit(id), mute: !edit.mute })} title="Mute (M)">
+                  {edit.mute ? '🔇' : '🔊'}
+                </button>
+                <input
+                  type="range"
+                  className="plain vol"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={edit.volume}
+                  onPointerDown={() => begin(id)}
+                  onChange={(e) => setEdit(id, { ...getEdit(id), volume: +e.target.value })}
+                  title="Volume"
+                  disabled={edit.mute || !photo.audio}
+                />
+                <span className="spacer" />
+                <button className="ghost" onClick={() => commit(id, { ...getEdit(id), trimIn: Math.min(time, trimOut - 0.1) })} title="Trim the start to the playhead">
+                  Set start
+                </button>
+                <button className="ghost" onClick={() => commit(id, { ...getEdit(id), trimOut: Math.max(time, edit.trimIn + 0.1) })} title="Trim the end to the playhead">
+                  Set end
+                </button>
+                <button className="ghost" onClick={splitHere} title="Split here (X)">
+                  ✂ Split
+                </button>
+                <button className="ghost" onClick={() => void setCover()} title="Use this frame as the library thumbnail">
+                  Set cover
+                </button>
+                <button
+                  className="ghost"
+                  disabled={!isEdited(edit)}
+                  onClick={() => commit(id, { ...getEdit(id), trimIn: 0, trimOut: 0, splits: [] })}
+                  title="Undo trim and splits"
+                >
+                  Reset clip
+                </button>
+              </div>
+              <VideoTimeline
+                dur={dur}
+                time={time}
+                edit={edit}
+                onSeek={(t) => {
+                  seekTo(t);
+                  setTime(t);
+                }}
+                onBegin={() => begin(id)}
+                onChange={(patch) => setEdit(id, { ...getEdit(id), ...patch })}
+              />
+            </div>
+          )}
           <div className="filmstrip" ref={stripRef}>
             {list.map((p) => (
               <button key={p.id} data-id={p.id} className={`strip-item${p.id === id ? ' on' : ''}`} onClick={() => store.set({ currentId: p.id, selection: new Set([p.id]), anchor: p.id })}>

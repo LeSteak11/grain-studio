@@ -14,7 +14,10 @@ use tauri::Manager;
 
 mod heic;
 
-const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "jfif", "png", "webp", "bmp", "gif", "avif", "heic", "heif"];
+const IMAGE_EXTS: &[&str] = &[
+    "jpg", "jpeg", "jfif", "png", "webp", "bmp", "gif", "avif", "heic", "heif", // photos
+    "mp4", "m4v", "mov", "webm", // videos
+];
 
 fn is_heic_ext(ext: &str) -> bool {
     ext == "heic" || ext == "heif"
