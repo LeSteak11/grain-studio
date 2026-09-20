@@ -424,3 +424,31 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .tl-bubble canvas { display: block; width: 160px; height: 90px; border-radius: 4px; background: #000; }
 .tl-bubble span { display: block; text-align: center; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; padding-top: 2px; }
 .timeline { position: relative; }
+
+/* ---- Preset browsing ---- */
+.preset-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.preset-tools .search { flex: 1; min-width: 0; margin: 0; }
+.views { flex: none; width: 92px; }
+.sort-sel { background: var(--bg); border: 1px solid var(--line2); border-radius: var(--r); color: var(--text); padding: 5px 8px; font-size: 12px; outline: none; }
+.sort-sel:focus { border-color: var(--dim); }
+.family-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 10px; }
+.family-row button { padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line2); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--dim); display: inline-flex; align-items: center; gap: 4px; }
+.family-row button:hover { color: var(--text); background: var(--panel2); }
+.family-row button.on { background: var(--accent); border-color: var(--accent); color: #111; }
+.family-row button i { font-style: normal; font-size: 9px; opacity: 0.6; font-weight: 600; }
+.family-head { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: var(--faint); padding: 8px 0 4px; position: sticky; top: 0; background: var(--panel); z-index: 2; }
+.group-head.sticky { position: sticky; top: 0; background: var(--panel); z-index: 3; padding-top: 8px; }
+
+.preset-grid.v-compact { grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.preset-grid.v-list { grid-template-columns: 1fr; gap: 2px; }
+.preset-tile.v-compact .code { font-size: 10px; }
+.preset-tile.v-list { border-radius: var(--r); }
+.preset-tile.v-list .tile-hit { flex-direction: row; align-items: center; gap: 9px; padding: 3px 6px; }
+.preset-tile.v-list canvas { width: 34px; height: 34px; aspect-ratio: auto; flex: none; }
+.preset-tile.v-list .code { flex: 1; font-size: 12px; letter-spacing: 0.03em; }
+.preset-tile.v-list .used { font-size: 10px; color: var(--faint); padding-right: 18px; }
+.preset-tile.v-list:hover { background: var(--panel2); }
+.preset-tile.v-list.on { background: #262626; }
+.preset-tile.v-list.on canvas { outline-color: var(--accent); }
+.preset-tile.v-list .fav-star { top: 50%; margin-top: -11px; right: 2px; }
+.picker .family-row { margin: 8px 0 2px; }

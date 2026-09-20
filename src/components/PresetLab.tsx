@@ -5,6 +5,7 @@ import { extractLutFromBytes, makeChartPng, CHART_W, CHART_H } from '../lib/char
 import { forgetLut, parseCube, putLut, toCube, userLutId } from '../lib/luts';
 import { refreshPreviews } from '../lib/previews';
 import { clearBusy, setBusy, store, toast, useStore } from '../lib/store';
+import { compareNames, matchesQuery } from '../lib/presetnames';
 
 function cleanName(raw: string): string {
   const n = raw
@@ -30,6 +31,8 @@ export function PresetLab() {
   const luts = useStore((s) => s.luts);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [q, setQ] = useState('');
+  const shown = luts.filter((n) => matchesQuery(n, q)).sort(compareNames);
   const close = () => store.set({ modal: null });
 
   const saveChart = async () => {
@@ -161,9 +164,11 @@ export function PresetLab() {
             Open folder
           </button>
         </div>
+        {luts.length > 8 && <input className="search" placeholder="Filter by name (e.g. A1, HB, +)" value={q} onChange={(e) => setQ(e.target.value)} />}
         <div className="lut-list">
           {luts.length === 0 && <p className="hint">None yet.</p>}
-          {luts.map((name) => (
+          {luts.length > 0 && shown.length === 0 && <p className="hint">No match.</p>}
+          {shown.map((name) => (
             <div key={name} className="lut-row">
               {renaming === name ? (
                 <form

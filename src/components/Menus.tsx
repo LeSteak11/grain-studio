@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { applyPreset, pasteEdits } from '../lib/library';
 import { BUILTIN, presetInfo, userLutId } from '../lib/luts';
+import { compareNames, familiesOf, matchesQuery, parseName } from '../lib/presetnames';
 import { useStore } from '../lib/store';
 
 /** Small click-to-open popover anchored under its button. */
@@ -74,19 +75,33 @@ export function PresetPicker({ ids }: { ids: () => string[] }) {
   const luts = useStore((s) => s.luts);
   const favs = useStore((s) => s.favPresets);
   const [q, setQ] = useState('');
+  const [family, setFamily] = useState<string | null>(null);
+  const families = useMemo(() => familiesOf(luts), [luts]);
   const all = useMemo(
     () => [...luts.map((n) => ({ id: userLutId(n), code: n, name: n })), ...BUILTIN.map((b) => ({ id: b.id, code: b.code, name: b.name }))],
     [luts],
   );
-  const needle = q.trim().toLowerCase();
   const list = all
-    .filter((p) => !needle || p.code.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle))
-    .sort((a, b) => Number(favs.includes(b.id)) - Number(favs.includes(a.id)));
+    .filter((p) => matchesQuery(p.name, q) && (!family || parseName(p.name).family === family))
+    .sort((a, b) => Number(favs.includes(b.id)) - Number(favs.includes(a.id)) || compareNames(a.name, b.name));
   return (
     <Popover label="Preset ▾" title="Apply a preset to the selected photos">
       {(close) => (
         <div className="picker">
           <input autoFocus placeholder="Search presets" value={q} onChange={(e) => setQ(e.target.value)} />
+          {families.length > 1 && (
+            <div className="family-row">
+              <button className={family === null ? 'on' : ''} onClick={() => setFamily(null)}>
+                All
+              </button>
+              {families.map((f) => (
+                <button key={f.family} className={family === f.family ? 'on' : ''} onClick={() => setFamily(family === f.family ? null : f.family)}>
+                  {f.family}
+                  <i>{f.count}</i>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="picker-list">
             <button
               onClick={() => {
