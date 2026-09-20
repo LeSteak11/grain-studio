@@ -303,12 +303,12 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .side-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
 .side-item.on .side-label { color: var(--text); font-weight: 600; }
 .side-item .count { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
-.side-tools { display: none; gap: 2px; padding-right: 4px; }
-.side-item:hover .side-tools { display: flex; }
+.side-tools { display: flex; gap: 2px; padding-right: 4px; opacity: 0.4; transition: opacity 0.1s; }
+.side-item:hover .side-tools, .side-item.on .side-tools { opacity: 1; }
 .side-tools button { width: 20px; height: 20px; border-radius: 4px; color: var(--faint); font-size: 12px; }
 .side-tools button:hover { color: var(--text); background: #333; }
-.side-add { display: block; width: 100%; text-align: left; padding: 6px 8px; color: var(--faint); font-size: 12px; border-radius: var(--r); }
-.side-add:hover { color: var(--text); background: var(--panel2); }
+.side-add { display: block; width: calc(100% - 4px); text-align: left; margin: 4px 2px 2px; padding: 6px 9px; color: var(--dim); font-size: 12px; border: 1px dashed var(--line2); border-radius: var(--r); }
+.side-add:hover { color: var(--text); background: var(--panel2); border-color: var(--dim); }
 .side-input { width: 100%; background: var(--bg); border: 1px solid var(--line2); border-radius: var(--r); color: var(--text); padding: 5px 8px; outline: none; margin: 2px 0; }
 .side-empty { color: var(--faint); font-size: 12px; margin: 2px 8px 6px; }
 .side-year { font-size: 10px; letter-spacing: 0.14em; color: var(--faint); padding: 6px 8px 2px; font-weight: 700; }
