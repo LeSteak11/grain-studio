@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { SaveState, thumbUrl } from './common';
 import { PasteMenu, Popover, PresetPicker } from './Menus';
 import { Sidebar } from './Sidebar';
@@ -102,6 +102,7 @@ export function Library() {
   const showInfo = useStore((s) => s.showInfo);
   const filter = useStore((s) => s.filter);
 
+  const gridRef = useRef<HTMLElement>(null);
   const selIds = photos.filter((p) => selection.has(p.id)).map((p) => p.id);
   const byDate = sort !== 'name';
 
@@ -125,6 +126,19 @@ export function Library() {
     }
     return out;
   }, [photos, byDate, sort]);
+
+  // Ctrl/⌘ + scroll over the grid resizes the photos.
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setThumb(store.get().thumbSize - Math.sign(e.deltaY) * 20);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   useEffect(() => {
     const kd = (e: KeyboardEvent) => {
@@ -150,6 +164,8 @@ export function Library() {
       else if (e.key === 'Enter' && sel.length) openEditor(sel[0]);
       else if (e.key === 'Escape') store.set({ selection: new Set() });
       else if (k === 'i') toggleInfo();
+      else if (e.key === '[') setThumb(store.get().thumbSize - 20);
+      else if (e.key === ']') setThumb(store.get().thumbSize + 20);
       else if (k === 'f' && sel.length) toggleFav(sel);
       else if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && list.length) {
         const i = list.findIndex((p) => p.id === s.anchor);
@@ -163,6 +179,8 @@ export function Library() {
   }, []);
 
   const setThumb = (v: number) => {
+    v = Math.round(Math.min(460, Math.max(100, v)));
+    if (v === store.get().thumbSize) return;
     store.set({ thumbSize: v });
     try {
       localStorage.setItem('gs.thumbSize', String(v));
@@ -216,7 +234,11 @@ export function Library() {
               </div>
             )}
           </Popover>
-          <input className="size" type="range" min={120} max={420} step={10} value={thumbSize} onChange={(e) => setThumb(+e.target.value)} title="Thumbnail size" />
+          <div className="gridsize" title="Photo size — drag, Ctrl+scroll over the grid, or press [ and ]">
+            <span className="gs-small">▪</span>
+            <input className="size" type="range" min={100} max={460} step={10} value={thumbSize} onChange={(e) => setThumb(+e.target.value)} aria-label="Photo size" />
+            <span className="gs-big">◼</span>
+          </div>
           <button className={`ghost${showInfo ? ' on' : ''}`} onClick={toggleInfo} title="Info panel (I)">
             Info
           </button>
@@ -313,7 +335,7 @@ export function Library() {
 
       <div className="lib-body">
         <Sidebar />
-        <main className="grid-wrap" onClick={() => store.set({ selection: new Set() })}>
+        <main className="grid-wrap" ref={gridRef} onClick={() => store.set({ selection: new Set() })}>
           {title && <h2 className="view-title">{title}</h2>}
           {total === 0 ? (
             <div className="empty">

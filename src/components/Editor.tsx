@@ -41,7 +41,8 @@ export function Editor() {
   const [tab, setTabState] = useState<Tab>(readTab);
   const [cropMode, setCropMode] = useState(false);
   const [compare, setCompare] = useState(false);
-  const [zoom, setZoom] = useState<{ x: number; y: number } | null>(null);
+  // null = fit to window. z is a multiplier of the fit scale; cx/cy centre the view in crop space.
+  const [zoom, setZoom] = useState<{ z: number; cx: number; cy: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [split, setSplit] = useState<number | null>(null);
   const [showHist, setShowHist] = useState(() => {
@@ -62,11 +63,20 @@ export function Editor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const rRef = useRef<Renderer | null>(null);
-  const viewRef = useRef<{ view: [number, number, number, number]; outW: number; outH: number }>({ view: [0, 0, 1, 1], outW: 1, outH: 1 });
+  const viewRef = useRef<{ view: [number, number, number, number]; outW: number; outH: number; fit: number; bw: number; bh: number }>({
+    view: [0, 0, 1, 1],
+    outW: 1,
+    outH: 1,
+    fit: 1,
+    bw: 1,
+    bh: 1,
+  });
   const live = useRef({ edit, cropMode, compare, zoom, photo, split, showHist });
   live.current = { edit, cropMode, compare, zoom, photo, split, showHist };
   const raf = useRef(0);
   const toggleHistRef = useRef<() => void>(() => undefined);
+  const toggleZoomRef = useRef<() => void>(() => undefined);
+  const zoomByRef = useRef<(f: number) => void>(() => undefined);
 
   const setTab = (t: Tab) => {
     setTabState(t);
@@ -90,23 +100,25 @@ export function Editor() {
     const bw = Math.max(50, stage.clientWidth - pad * 2);
     const bh = Math.max(50, stage.clientHeight - pad * 2);
     const dpr = window.devicePixelRatio || 1;
+    const fit = Math.min(bw / outW, bh / outH);
+    const z = L.cropMode ? 1 : (L.zoom?.z ?? 1);
     let cssW: number;
     let cssH: number;
     let view: [number, number, number, number] = [0, 0, 1, 1];
-    if (L.zoom && !L.cropMode) {
-      const vw = Math.min(1, (bw * dpr) / outW);
-      const vh = Math.min(1, (bh * dpr) / outH);
-      cssW = (vw * outW) / dpr;
-      cssH = (vh * outH) / dpr;
-      const cx = clamp(L.zoom.x, vw / 2, 1 - vw / 2);
-      const cy = clamp(L.zoom.y, vh / 2, 1 - vh / 2);
+    if (z > 1.001) {
+      const scale = fit * z;
+      const vw = Math.min(1, bw / (outW * scale));
+      const vh = Math.min(1, bh / (outH * scale));
+      cssW = outW * scale * vw;
+      cssH = outH * scale * vh;
+      const cx = clamp(L.zoom!.cx, vw / 2, 1 - vw / 2);
+      const cy = clamp(L.zoom!.cy, vh / 2, 1 - vh / 2);
       view = [cx - vw / 2, cy - vh / 2, vw, vh];
     } else {
-      const s = Math.min(bw / outW, bh / outH);
-      cssW = outW * s;
-      cssH = outH * s;
+      cssW = outW * fit;
+      cssH = outH * fit;
     }
-    viewRef.current = { view, outW, outH };
+    viewRef.current = { view, outW, outH, fit, bw, bh };
     frame.style.width = `${Math.round(cssW)}px`;
     frame.style.height = `${Math.round(cssH)}px`;
     r.resize(Math.round(cssW) * dpr, Math.round(cssH) * dpr);
@@ -153,6 +165,27 @@ export function Editor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Zoom where 1 image pixel = 1 screen pixel. */
+  const zoom100 = () => 1 / (viewRef.current.fit * (window.devicePixelRatio || 1));
+  const maxZoom = () => Math.max(2, zoom100() * 3);
+
+  /** Zoom by a factor, keeping the point under the cursor (rel 0..1 of the canvas) in place. */
+  const zoomBy = useCallback((factor: number, relX = 0.5, relY = 0.5) => {
+    const { view, outW, outH, fit, bw, bh } = viewRef.current;
+    const cur = live.current.zoom?.z ?? 1;
+    const next = clamp(cur * factor, 1, maxZoom());
+    if (next <= 1.001) {
+      setZoom(null);
+      return;
+    }
+    const qx = view[0] + relX * view[2];
+    const qy = view[1] + relY * view[3];
+    const vw = Math.min(1, bw / (outW * fit * next));
+    const vh = Math.min(1, bh / (outH * fit * next));
+    setZoom({ z: next, cx: qx - (relX - 0.5) * vw, cy: qy - (relY - 0.5) * vh });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const schedule = useCallback(() => {
     if (raf.current) return;
     raf.current = requestAnimationFrame(() => {
@@ -160,6 +193,26 @@ export function Editor() {
       draw();
     });
   }, [draw]);
+
+  // Scroll wheel zooms the photo (a native listener, so the page never scrolls instead).
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const onWheel = (e: WheelEvent) => {
+      if (live.current.cropMode) return;
+      e.preventDefault();
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const r = canvas.getBoundingClientRect();
+      const relX = (e.clientX - r.left) / r.width;
+      const relY = (e.clientY - r.top) / r.height;
+      const inside = relX >= 0 && relX <= 1 && relY >= 0 && relY <= 1;
+      const step = e.deltaMode === 1 ? 18 : e.deltaMode === 2 ? 400 : 1;
+      zoomBy(Math.exp((-e.deltaY * step) / 420), inside ? relX : 0.5, inside ? relY : 0.5);
+    };
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    return () => stage.removeEventListener('wheel', onWheel);
+  }, [zoomBy]);
 
   // GL context for the lifetime of the editor view.
   useEffect(() => {
@@ -289,7 +342,10 @@ export function Editor() {
       if (e.key === 'ArrowLeft') step(-1);
       else if (e.key === 'ArrowRight') step(1);
       else if (k === 'c') setCropMode((v) => !v);
-      else if (k === 'z') setZoom((z) => (z ? null : { x: 0.5, y: 0.5 }));
+      else if (k === 'z') toggleZoomRef.current();
+      else if (e.key === '+' || e.key === '=') zoomByRef.current(1.25);
+      else if (e.key === '-' || e.key === '_') zoomByRef.current(1 / 1.25);
+      else if (e.key === '0') setZoom(null);
       else if (k === 'f') toggleFav([cur]);
       else if (k === 'p') setTab('presets');
       else if (k === 'i') setTab('info');
@@ -309,6 +365,8 @@ export function Editor() {
   }, []);
 
   toggleHistRef.current = toggleHist;
+  toggleZoomRef.current = () => (live.current.zoom ? setZoom(null) : zoomBy(zoom100()));
+  zoomByRef.current = (f: number) => zoomBy(f);
 
   if (!id || !photo) return null;
 
@@ -337,17 +395,20 @@ export function Editor() {
       return;
     }
     const rect = canvasRef.current!.getBoundingClientRect();
-    setZoom({ x: (ev.clientX - rect.left) / rect.width, y: (ev.clientY - rect.top) / rect.height });
+    const relX = (ev.clientX - rect.left) / rect.width;
+    const relY = (ev.clientY - rect.top) / rect.height;
+    zoomBy(zoom100(), relX, relY);
   };
 
   const onCanvasDown = (ev: React.PointerEvent) => {
     if (!zoom || cropMode || ev.button !== 0) return;
-    const { view, outW, outH } = viewRef.current;
+    const { view, outW, outH, fit } = viewRef.current;
     const start = { x: view[0] + view[2] / 2, y: view[1] + view[3] / 2 };
     const sx = ev.clientX;
     const sy = ev.clientY;
-    const dpr = window.devicePixelRatio || 1;
-    const move = (e: PointerEvent) => setZoom({ x: start.x - ((e.clientX - sx) * dpr) / outW, y: start.y - ((e.clientY - sy) * dpr) / outH });
+    const z = zoom.z;
+    const move = (e: PointerEvent) =>
+      setZoom({ z, cx: start.x - (e.clientX - sx) / (outW * fit * z), cy: start.y - (e.clientY - sy) / (outH * fit * z) });
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -410,9 +471,27 @@ export function Editor() {
           <button className={`icon${split !== null ? ' on' : ''}`} onClick={() => setSplit(split === null ? 0.5 : null)} title="Split before/after (S)">
             ◧
           </button>
-          <button className={`icon${zoom ? ' on' : ''}`} onClick={() => setZoom(zoom ? null : { x: 0.5, y: 0.5 })} title="Zoom 100% (Z, or double-click)">
-            1:1
-          </button>
+          <div className="zoombar" title="Zoom — scroll the photo, or drag this slider">
+            <button className="icon" onClick={() => setZoom(null)} disabled={!zoom} title="Fit to window (0)">
+              Fit
+            </button>
+            <input
+              type="range"
+              className="plain zoom-range"
+              min={0}
+              max={1}
+              step={0.001}
+              value={Math.log(zoom?.z ?? 1) / Math.log(maxZoom())}
+              onChange={(e) => {
+                const z = Math.pow(maxZoom(), +e.target.value);
+                if (z <= 1.001) setZoom(null);
+                else setZoom({ z, cx: zoom?.cx ?? 0.5, cy: zoom?.cy ?? 0.5 });
+              }}
+            />
+            <button className="zoom-pct" onClick={() => zoomBy(zoom100() / (zoom?.z ?? 1))} title="Zoom to 100% (Z)">
+              {Math.round((zoom?.z ?? 1) * viewRef.current.fit * (window.devicePixelRatio || 1) * 100)}%
+            </button>
+          </div>
           <button className={`icon${showHist ? ' on' : ''}`} onClick={toggleHist} title="Histogram (H)">
             ▁▃▆
           </button>

@@ -361,3 +361,13 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .post-prompt button:hover { background: var(--accent); color: #111; }
 .post-prompt button.dim { background: none; color: var(--faint); }
 .post-prompt button.dim:hover { background: none; color: var(--text); }
+
+/* Zoom + grid size controls */
+.zoombar { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
+.zoom-range { width: 110px; }
+.zoom-pct { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; min-width: 42px; text-align: right; padding: 4px 2px; }
+.zoom-pct:hover { color: var(--text); }
+.zoombar .icon { min-width: 30px; font-size: 11px; }
+.gridsize { display: flex; align-items: center; gap: 6px; }
+.gridsize .gs-small { font-size: 7px; color: var(--faint); }
+.gridsize .gs-big { font-size: 13px; color: var(--faint); }
