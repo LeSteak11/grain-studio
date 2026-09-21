@@ -70,7 +70,28 @@ export async function copyImage(id: string) {
 
 const iconPath = (id: string) => join(paths.dragDir(), id, '_drag-icon.png');
 
-const shareFiles = new Map<string, { edit: EditState | undefined; path: Promise<string> }>();
+interface ShareEntry {
+  edit: EditState | undefined;
+  path: Promise<string>;
+  /** Set once the file exists on disk, so we know a drag can start immediately. */
+  done: boolean;
+}
+
+const shareFiles = new Map<string, ShareEntry>();
+
+function remember(id: string, edit: EditState | undefined, path: Promise<string>): Promise<string> {
+  const entry: ShareEntry = { edit, path, done: false };
+  path.then(
+    () => {
+      if (shareFiles.get(id) === entry) entry.done = true;
+    },
+    () => {
+      if (shareFiles.get(id) === entry) shareFiles.delete(id);
+    },
+  );
+  shareFiles.set(id, entry);
+  return path;
+}
 
 /** Renders (or reuses) a temp file of the edited item for dragging out. */
 export function renderShareFile(id: string): Promise<string> {
@@ -81,10 +102,7 @@ export function renderShareFile(id: string): Promise<string> {
   if (photo && isVideo(photo)) {
     // Untouched clips drag out as the original file, instantly.
     if (!isEdited(edit)) return Promise.resolve(photo.file);
-    const path = renderVideoShare(photo, edit ?? DEFAULT_EDIT);
-    path.catch(() => shareFiles.delete(id));
-    shareFiles.set(id, { edit, path });
-    return path;
+    return remember(id, edit, renderVideoShare(photo, edit ?? DEFAULT_EDIT));
   }
   const path = (async () => {
     const blob = await renderShareBlob(id, 'image/jpeg');
@@ -100,9 +118,7 @@ export function renderShareFile(id: string): Promise<string> {
     await fsx.writeBytes(iconPath(id), new Uint8Array(await icon.arrayBuffer()));
     return file;
   })();
-  path.catch(() => shareFiles.delete(id));
-  shareFiles.set(id, { edit, path });
-  return path;
+  return remember(id, edit, path);
 }
 
 async function renderVideoShare(photo: Photo, edit: EditState): Promise<string> {
@@ -127,10 +143,8 @@ export function shareReady(id: string): boolean {
   if (!isVideo(photo)) return true;
   if (!isEdited(s.edits[id])) return true;
   const hit = shareFiles.get(id);
-  return !!hit && hit.edit === s.edits[id] && settled.has(hit.path);
+  return !!hit && hit.edit === s.edits[id] && hit.done;
 }
-
-const settled = new Set<Promise<string> | string>();
 
 /** True while an outgoing drag is in progress, so our own drop handler ignores it. */
 export let draggingOut = false;
@@ -140,9 +154,14 @@ export async function dragOut(ids: string[]) {
   draggingOut = true;
   try {
     const dragged = ids.slice(0, 40);
-    const files = await Promise.all(dragged.map(renderShareFile));
-    for (const f of files) settled.add(f);
-    await startDrag({ item: files, icon: iconPath(ids[0]) }, (payload) => {
+    const files = (await Promise.all(dragged.map(renderShareFile))).filter(Boolean);
+    if (!files.length) {
+      toast('Nothing to drag yet');
+      return;
+    }
+    const first = store.get().photos.find((p) => p.id === dragged[0]);
+    const icon = first && isVideo(first) ? paths.thumb(first.id) : iconPath(dragged[0]);
+    await startDrag({ item: files, icon }, (payload) => {
       // Dropped somewhere: offer to mark these as posted.
       if (payload.result === 'Dropped') store.set({ postPrompt: { ids: dragged, at: Date.now() } });
     });
@@ -167,12 +186,12 @@ export function dragOutGesture(ev: React.PointerEvent, ids: () => string[]) {
   });
   if (needRender.length) {
     toast(`Rendering ${needRender.length === 1 ? 'the clip' : `${needRender.length} clips`}… drag again when it's done`);
-    void Promise.all(needRender.map((id) => renderShareFile(id).then((f) => settled.add(f))))
+    void Promise.all(needRender.map((id) => renderShareFile(id)))
       .then(() => toast('Ready — drag it out now'))
       .catch((e) => toast(`Render failed: ${e instanceof Error ? e.message : e}`));
     return;
   }
-  list.slice(0, 40).forEach((id) => void renderShareFile(id).then((f) => settled.add(f)).catch(() => undefined));
+  list.slice(0, 40).forEach((id) => void renderShareFile(id).catch(() => undefined));
   const move = (e: PointerEvent) => {
     if (Math.hypot(e.clientX - sx, e.clientY - sy) < 7) return;
     cleanup();
