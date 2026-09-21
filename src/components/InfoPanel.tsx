@@ -1,5 +1,17 @@
 import { useState } from 'react';
-import { createGroup, createLabel, setCreated, setNote, setPosted, toggleGroup, toggleLabel } from '../lib/organize';
+import {
+  createGroup,
+  createLabel,
+  createPlatform,
+  deleteGroup,
+  deleteLabel,
+  deletePlatform,
+  setCreated,
+  setNote,
+  setPosted,
+  toggleGroup,
+  toggleLabel,
+} from '../lib/organize';
 import { store, useStore } from '../lib/store';
 import { createdOf, type Photo } from '../lib/types';
 
@@ -21,10 +33,36 @@ export function InfoPanel({ ids, embedded }: { ids: string[]; embedded?: boolean
   const [groupName, setGroupName] = useState('');
   const [newLabel, setNewLabel] = useState(false);
   const [labelName, setLabelName] = useState('');
+  const [newPlatform, setNewPlatform] = useState(false);
+  const [platformName, setPlatformName] = useState('');
+  /** Which section is in "manage" mode, where items show a delete button. */
+  const [managing, setManaging] = useState<'labels' | 'groups' | 'platforms' | null>(null);
 
   const sel: Photo[] = photos.filter((p) => ids.includes(p.id));
   if (!sel.length) return <div className="info empty-info">Select a photo to see its details.</div>;
   const one = sel.length === 1 ? sel[0] : null;
+
+  const addInput = (value: string, setValue: (v: string) => void, placeholder: string, commit: () => void, cancel: () => void) => (
+    <input
+      className="tag-input"
+      autoFocus
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') cancel();
+      }}
+    />
+  );
+
+  const manageBtn = (which: 'labels' | 'groups' | 'platforms', count: number) =>
+    count > 0 ? (
+      <button className={`manage${managing === which ? ' on' : ''}`} onClick={() => setManaging(managing === which ? null : which)} title="Rename or delete these">
+        {managing === which ? 'Done' : 'Edit'}
+      </button>
+    ) : null;
 
   const has = (key: 'labels' | 'groups', id: string) => {
     const n = sel.filter((p) => p[key]?.includes(id)).length;
@@ -66,32 +104,69 @@ export function InfoPanel({ ids, embedded }: { ids: string[]; embedded?: boolean
       </div>
 
       <div className="info-sec">
-        <span className="info-title">Posted</span>
+        <span className="info-title">
+          Posted {manageBtn('platforms', platforms.length)}
+        </span>
         <div className="post-row">
           {platforms.map((pl) => {
             const n = sel.filter((p) => p.posted?.[pl.id]).length;
             const state = n === 0 ? '' : n === sel.length ? ' on' : ' some';
             return (
-              <button key={pl.id} className={`post-btn${state}`} onClick={() => setPosted(ids, pl.id)} title={one?.posted?.[pl.id] ? `Posted ${fmtDate(one.posted[pl.id]!)}` : `Mark as posted to ${pl.name}`}>
-                {pl.name}
-                {one?.posted?.[pl.id] && <span className="when">{fmtShort(one.posted[pl.id]!)}</span>}
-              </button>
+              <span key={pl.id} className="post-wrap">
+                <button className={`post-btn${state}`} onClick={() => setPosted(ids, pl.id)} title={one?.posted?.[pl.id] ? `Posted ${fmtDate(one.posted[pl.id]!)}` : `Mark as posted to ${pl.name}`}>
+                  {pl.name}
+                  {one?.posted?.[pl.id] && <span className="when">{fmtShort(one.posted[pl.id]!)}</span>}
+                </button>
+                {managing === 'platforms' && (
+                  <button className="kill" title={`Remove ${pl.name} from the list`} onClick={() => void deletePlatform(pl.id)}>
+                    ×
+                  </button>
+                )}
+              </span>
             );
           })}
-          {!platforms.length && <p className="info-note">Add the places you post from the sidebar.</p>}
         </div>
+        {newPlatform
+          ? addInput(
+              platformName,
+              setPlatformName,
+              'Instagram, TikTok, Pinterest…',
+              () => {
+                if (platformName.trim()) createPlatform(platformName);
+                setPlatformName('');
+                setNewPlatform(false);
+              },
+              () => {
+                setPlatformName('');
+                setNewPlatform(false);
+              },
+            )
+          : (
+            <button className="add-line" onClick={() => setNewPlatform(true)}>
+              + Add a platform
+            </button>
+          )}
       </div>
 
       <div className="info-sec">
-        <span className="info-title">Labels</span>
+        <span className="info-title">
+          Labels {manageBtn('labels', labels.length)}
+        </span>
         <div className="chips">
           {labels.map((l) => {
             const st = has('labels', l.id);
             return (
-              <button key={l.id} className={`chip toggle ${st}`} style={st === 'off' ? undefined : { borderColor: l.color, background: `${l.color}22` }} onClick={() => toggleLabel(ids, l.id)}>
-                <span className="dot" style={{ background: l.color }} />
-                {l.name}
-              </button>
+              <span key={l.id} className="chip-wrap">
+                <button className={`chip toggle ${st}`} style={st === 'off' ? undefined : { borderColor: l.color, background: `${l.color}22` }} onClick={() => toggleLabel(ids, l.id)}>
+                  <span className="dot" style={{ background: l.color }} />
+                  {l.name}
+                </button>
+                {managing === 'labels' && (
+                  <button className="kill" title={`Delete the label “${l.name}”`} onClick={() => void deleteLabel(l.id)}>
+                    ×
+                  </button>
+                )}
+              </span>
             );
           })}
           {!labels.length && <p className="info-note">No labels yet — make one below.</p>}
@@ -117,23 +192,33 @@ export function InfoPanel({ ids, embedded }: { ids: string[]; embedded?: boolean
             }}
           />
         ) : (
-          <button className="link" onClick={() => setNewLabel(true)}>
+          <button className="add-line" onClick={() => setNewLabel(true)}>
             + New label for {sel.length === 1 ? 'this' : `these ${sel.length}`}
           </button>
         )}
       </div>
 
       <div className="info-sec">
-        <span className="info-title">Groups</span>
+        <span className="info-title">
+          Groups {manageBtn('groups', groups.length)}
+        </span>
         <div className="chips">
           {groups.map((g) => {
             const st = has('groups', g.id);
             return (
-              <button key={g.id} className={`chip toggle ${st}`} onClick={() => toggleGroup(ids, g.id)}>
-                {g.name}
-              </button>
+              <span key={g.id} className="chip-wrap">
+                <button className={`chip toggle ${st}`} onClick={() => toggleGroup(ids, g.id)}>
+                  {g.name}
+                </button>
+                {managing === 'groups' && (
+                  <button className="kill" title={`Delete the group “${g.name}”`} onClick={() => void deleteGroup(g.id)}>
+                    ×
+                  </button>
+                )}
+              </span>
             );
           })}
+          {!groups.length && <p className="info-note">No groups yet.</p>}
         </div>
         {newGroup ? (
           <input
@@ -156,7 +241,7 @@ export function InfoPanel({ ids, embedded }: { ids: string[]; embedded?: boolean
             }}
           />
         ) : (
-          <button className="link" onClick={() => setNewGroup(true)}>
+          <button className="add-line" onClick={() => setNewGroup(true)}>
             + New group with {sel.length === 1 ? 'this photo' : `these ${sel.length}`}
           </button>
         )}

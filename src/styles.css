@@ -457,3 +457,14 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .palette { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 8px 8px; }
 .palette button { width: 18px; height: 18px; border-radius: 50%; outline: 2px solid transparent; outline-offset: 2px; }
 .palette button.on { outline-color: var(--accent); }
+
+/* Info panel: add + manage controls */
+.info-title { display: flex; align-items: center; gap: 8px; }
+.manage { margin-left: auto; font-size: 10px; letter-spacing: 0.06em; color: var(--dim); border: 1px solid var(--line2); border-radius: 999px; padding: 2px 8px; text-transform: none; }
+.manage:hover { color: var(--text); border-color: var(--dim); }
+.manage.on { background: var(--accent); color: #111; border-color: var(--accent); }
+.add-line { display: block; width: 100%; text-align: left; margin-top: 8px; padding: 7px 10px; font-size: 12px; color: var(--dim); border: 1px dashed var(--line2); border-radius: var(--r); }
+.add-line:hover { color: var(--text); background: var(--panel2); border-color: var(--dim); }
+.chip-wrap, .post-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.kill { width: 20px; height: 20px; border-radius: 50%; color: var(--danger); font-size: 14px; line-height: 1; }
+.kill:hover { background: var(--danger); color: #111; }

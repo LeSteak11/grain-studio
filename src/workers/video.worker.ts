@@ -127,10 +127,18 @@ async function run(job: Job) {
       video: { codec: 'avc', width: W, height: H, frameRate: fps },
       audio: job.audio ? { codec: 'aac', numberOfChannels: job.audio.channels.length, sampleRate: job.audio.sampleRate } : undefined,
       fastStart: 'in-memory',
+      // Encoders emit decode timestamps that don't start exactly at zero (B-frames); let the muxer rebase them.
+      firstTimestampBehavior: 'offset',
     });
     const bitrate = Math.round(Math.min(60e6, W * H * fps * (0.06 + 0.1 * job.quality)));
     const encoder = new VideoEncoder({
-      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      output: (chunk, meta) => {
+        try {
+          muxer.addVideoChunk(chunk, meta);
+        } catch (e) {
+          failure = e as Error;
+        }
+      },
       error: (e) => (failure = e as Error),
     });
     encoder.configure({ codec: 'avc1.640028', width: W, height: H, bitrate, framerate: fps, hardwareAcceleration: 'prefer-hardware', avc: { format: 'avc' } });
@@ -198,7 +206,13 @@ async function run(job: Job) {
     const chCount = channels.length;
     const total = channels[0]?.length ?? 0;
     const aenc = new AudioEncoder({
-      output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+      output: (chunk, meta) => {
+        try {
+          muxer.addAudioChunk(chunk, meta);
+        } catch (e) {
+          failure = e as Error;
+        }
+      },
       error: (e) => (failure = e as Error),
     });
     aenc.configure({ codec: 'mp4a.40.2', sampleRate, numberOfChannels: chCount, bitrate: 160_000 });

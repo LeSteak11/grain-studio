@@ -44,6 +44,9 @@ function savePref(key: string, v: string) {
 export function ExportDialog() {
   const ids = useStore((s) => s.exportIds);
   const firstName = useStore((s) => s.photos.find((p) => p.id === s.exportIds[0])?.name ?? 'photo');
+  const videoCount = useStore((s) => s.photos.filter((p) => s.exportIds.includes(p.id) && p.kind === 'video').length);
+  const allVideo = videoCount === ids.length && ids.length > 0;
+  const anyVideo = videoCount > 0;
   const single = ids.length === 1;
   const [o, setO] = useState<ExportOpts>(loadOpts);
   const set = (p: Partial<ExportOpts>) => setO((x) => ({ ...x, ...p }));
@@ -56,7 +59,7 @@ export function ExportDialog() {
   const [exists, setExists] = useState(false);
   const [example] = useState(() => randomName());
 
-  const ext = o.format === 'png' ? 'png' : 'jpg';
+  const ext = allVideo ? 'mp4' : o.format === 'png' ? 'png' : 'jpg';
   const clean = sanitizeName(name);
   const cleanBase = sanitizeName(base) || 'photo';
   const pad = Math.max(2, String(ids.length).length);
@@ -107,7 +110,7 @@ export function ExportDialog() {
     <div className="modal-bg" onMouseDown={close}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <h3>
-          Export {ids.length} photo{ids.length === 1 ? '' : 's'}
+          Export {ids.length} {allVideo ? (ids.length === 1 ? 'clip' : 'clips') : ids.length === 1 ? 'item' : 'items'}
         </h3>
 
         {single ? (
@@ -183,22 +186,32 @@ export function ExportDialog() {
             ))}
           </div>
         </div>
-        <div className="field">
-          <span>Format</span>
-          <div className="seg">
-            <button className={o.format === 'jpeg' ? 'on' : ''} onClick={() => set({ format: 'jpeg' })}>
-              JPEG
-            </button>
-            <button className={o.format === 'png' ? 'on' : ''} onClick={() => set({ format: 'png' })}>
-              PNG
-            </button>
+        {!allVideo && (
+          <div className="field">
+            <span>Format{anyVideo ? ' (photos)' : ''}</span>
+            <div className="seg">
+              <button className={o.format === 'jpeg' ? 'on' : ''} onClick={() => set({ format: 'jpeg' })}>
+                JPEG
+              </button>
+              <button className={o.format === 'png' ? 'on' : ''} onClick={() => set({ format: 'png' })}>
+                PNG
+              </button>
+            </div>
           </div>
-        </div>
-        {o.format === 'jpeg' && (
+        )}
+        {(allVideo || o.format === 'jpeg') && (
           <label className="field">
-            <span>Quality · {Math.round(o.quality * 100)}</span>
+            <span>
+              {allVideo ? 'Video quality' : 'Quality'} · {Math.round(o.quality * 100)}
+            </span>
             <input type="range" className="plain" min={0.6} max={1} step={0.01} value={o.quality} onChange={(e) => set({ quality: +e.target.value })} />
           </label>
+        )}
+        {anyVideo && (
+          <p className="name-preview">
+            {allVideo ? 'Clips export as MP4 (H.264)' : 'Photos use the format above; clips always export as MP4'}
+            {' · split clips write one file per piece'}
+          </p>
         )}
         <div className="field">
           <span>Folder</span>
