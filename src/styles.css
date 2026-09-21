@@ -533,3 +533,7 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .combine-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .combine-meta .dim { font-size: 11px; }
 .combine-row .icon { min-width: 26px; height: 26px; font-size: 13px; }
+
+/* ---- Remix marking ---- */
+.remix-mark { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(237, 237, 234, 0.35); border-radius: 3px; padding: 2px 5px; backdrop-filter: blur(2px); }
+.tl-join { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(237, 237, 234, 0.42); pointer-events: none; }

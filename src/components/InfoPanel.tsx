@@ -80,6 +80,7 @@ export function InfoPanel({ ids, embedded }: { ids: string[]; embedded?: boolean
             <div className="dim small">
               {one.w} × {one.h}
             </div>
+            {one.remix && <div className="dim small">Remix of {one.remix.of.length} clips</div>}
           </>
         ) : (
           <div className="info-name">{sel.length} {kindWord(sel)} selected</div>

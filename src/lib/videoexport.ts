@@ -89,6 +89,18 @@ const rangeOf = (it: SeqItem) => {
   return end - start < 0.05 ? { start: 0, end: dur } : { start, end };
 };
 
+/** Seconds into the combined clip where each part after the first begins. */
+export function sequenceJoins(items: SeqItem[]): number[] {
+  const out: number[] = [];
+  let at = 0;
+  for (let i = 0; i < items.length - 1; i++) {
+    const r = rangeOf(items[i]);
+    at += r.end - r.start;
+    out.push(Math.round(at * 1000) / 1000);
+  }
+  return out;
+}
+
 export const sequenceDuration = (items: SeqItem[]) => items.reduce((a, it) => { const r = rangeOf(it); return a + (r.end - r.start); }, 0);
 
 /**

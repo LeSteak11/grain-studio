@@ -230,7 +230,7 @@ export async function importPaths(input: string[]) {
 }
 
 /** Shared pipeline: load/copy → worker thumbnail → add to library. Opens the editor if `openSingle` and one photo came in. */
-export async function runImport(jobs: ImportJob[], openSingle: boolean) {
+export async function runImport(jobs: ImportJob[], openSingle: boolean, extra?: Partial<Photo>) {
   if (importing) {
     toast('Import already running');
     return;
@@ -280,6 +280,7 @@ export async function runImport(jobs: ImportJob[], openSingle: boolean) {
                 kind: 'video',
                 dur: v.dur,
                 audio: v.audio,
+                ...extra,
               });
               added.push(got.id);
               done++;
@@ -289,7 +290,7 @@ export async function runImport(jobs: ImportJob[], openSingle: boolean) {
             const t = await makeThumb(got.bytes);
             await fsx.writeBytes(paths.thumb(got.id), new Uint8Array(t.buf));
             if (t.pbuf) await fsx.writeBytes(paths.preview(got.id), new Uint8Array(t.pbuf));
-            buffer.push({ id: got.id, file: got.path, name: got.name, size, w: t.w, h: t.h, added: now - q.i, pv: !!t.pbuf, created: got.created ?? now, groups: intoGroup });
+            buffer.push({ id: got.id, file: got.path, name: got.name, size, w: t.w, h: t.h, added: now - q.i, pv: !!t.pbuf, created: got.created ?? now, groups: intoGroup, ...extra });
             added.push(got.id);
           } catch (e) {
             console.warn('import failed', q.j.name, e);

@@ -14,10 +14,12 @@ interface Props {
   strip?: string[];
   /** Draws the frame at `t` into the hover bubble's canvas. */
   onPreview?: (t: number, canvas: HTMLCanvasElement) => void;
+  /** Seconds where a remix's parts meet, drawn as faint guides. */
+  joins?: number[];
 }
 
 /** Trim handles, split markers and a scrubbable playhead. */
-export function VideoTimeline({ dur, time, edit, onSeek, onBegin, onChange, strip, onPreview }: Props) {
+export function VideoTimeline({ dur, time, edit, onSeek, onBegin, onChange, strip, onPreview, joins }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
   const bubbleRef = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -86,6 +88,9 @@ export function VideoTimeline({ dur, time, edit, onSeek, onBegin, onChange, stri
           </div>
         )}
         <div className="tl-trimmed" style={{ left: pct(inT), width: pct(outT - inT) }} />
+        {joins?.map((t) => (
+          <div key={`j${t}`} className="tl-join" style={{ left: pct(t) }} title={`Clips meet at ${fmtTime(t)}`} />
+        ))}
         {segs.slice(1).map((s, i) => (
           <div key={i} className="tl-seg-line" style={{ left: pct(s.start) }} />
         ))}

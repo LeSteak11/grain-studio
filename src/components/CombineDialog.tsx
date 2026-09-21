@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
-import { paths } from '../lib/fs';
-import { combineClips, type ExportOpts } from '../lib/export';
+import { combineClips } from '../lib/export';
 import { sequenceDuration, type SeqItem } from '../lib/videoexport';
 import { randomName, sanitizeName } from '../lib/naming';
 import { store, useStore } from '../lib/store';
@@ -22,12 +20,12 @@ const SHAPES = [
   { id: '16:9', label: '16:9' },
 ];
 
-function loadOpts(): ExportOpts {
-  const d: ExportOpts = { dir: paths.exports(), format: 'jpeg', quality: 0.92, size: 0, openAfter: true };
+function readNum(key: string, fallback: number): number {
   try {
-    return { ...d, ...JSON.parse(localStorage.getItem('gs.export') ?? '{}') };
+    const v = Number(localStorage.getItem(key));
+    return Number.isFinite(v) ? v : fallback;
   } catch {
-    return d;
+    return fallback;
   }
 }
 
@@ -35,11 +33,10 @@ export function CombineDialog() {
   const ids = useStore((s) => s.combineIds);
   const photos = useStore((s) => s.photos);
   const edits = useStore((s) => s.edits);
-  const [o, setO] = useState<ExportOpts>(loadOpts);
   const [shape, setShape] = useState('first');
-  const [name, setName] = useState(() => randomName());
-  const [addToLibrary, setAddToLibrary] = useState(true);
-  const set = (p: Partial<ExportOpts>) => setO((x) => ({ ...x, ...p }));
+  const [size, setSize] = useState(() => readNum('gs.remixSize', 0));
+  const [quality, setQuality] = useState(() => readNum('gs.remixQuality', 0.92));
+  const [name, setName] = useState(() => `Remix ${randomName(6)}`);
   const close = () => store.set({ modal: null, combineIds: [] });
 
   const clips = ids.map((id) => photos.find((p) => p.id === id)).filter((p): p is Photo => !!p && isVideo(p));
@@ -56,25 +53,27 @@ export function CombineDialog() {
     store.set({ combineIds: next });
   };
 
-  const drop = (i: number) => store.set({ combineIds: ids.filter((_, n) => n !== i) });
-
   const run = () => {
     if (!canRun) return;
     try {
-      localStorage.setItem('gs.export', JSON.stringify(o));
+      localStorage.setItem('gs.remixSize', String(size));
+      localStorage.setItem('gs.remixQuality', String(quality));
     } catch {
       /* ignore */
     }
     const order = [...ids];
     close();
-    void combineClips(order, shape, o, clean, addToLibrary);
+    void combineClips(order, shape, size, quality, clean);
   };
 
   return (
     <div className="modal-bg" onMouseDown={close}>
       <div className="modal combine" onMouseDown={(e) => e.stopPropagation()}>
-        <h3>Combine {clips.length} clips</h3>
-        <p className="lede">They play top to bottom as one video. Each clip keeps its own preset, trim and text.</p>
+        <h3>Make a remix from {clips.length} clips</h3>
+        <p className="lede">
+          They play top to bottom as one new clip in your library, which you can trim, grade and export like anything else. The originals are
+          left alone.
+        </p>
 
         <div className="combine-list">
           {clips.map((p, i) => {
@@ -95,7 +94,7 @@ export function CombineDialog() {
                 <button className="icon" disabled={i === clips.length - 1} onClick={() => move(i, 1)} title="Move down">
                   ↓
                 </button>
-                <button className="icon" onClick={() => drop(i)} title="Take out of this combine">
+                <button className="icon" onClick={() => store.set({ combineIds: ids.filter((_, n) => n !== i) })} title="Take out of this remix">
                   ✕
                 </button>
               </div>
@@ -116,16 +115,15 @@ export function CombineDialog() {
               </button>
             ))}
           </div>
-          <div className="name-preview">Clips that are a different shape get centre-cropped to match.</div>
+          <div className="name-preview">Clips of a different shape get centre-cropped to match.</div>
         </div>
 
         <div className="field">
-          <span>File name</span>
+          <span>Name</span>
           <div className="name-row">
-            <input spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} placeholder="File name" />
-            <span className="ext">.mp4</span>
-            <button className="dice" title="Random 15-character name" onClick={() => setName(randomName())}>
-              🎲 Randomize
+            <input spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} placeholder="Name this remix" />
+            <button className="dice" title="New random name" onClick={() => setName(`Remix ${randomName(6)}`)}>
+              🎲
             </button>
           </div>
         </div>
@@ -134,7 +132,7 @@ export function CombineDialog() {
           <span>Size (long edge)</span>
           <div className="seg">
             {SIZES.map((sz) => (
-              <button key={sz.v} className={o.size === sz.v ? 'on' : ''} onClick={() => set({ size: sz.v })}>
+              <button key={sz.v} className={size === sz.v ? 'on' : ''} onClick={() => setSize(sz.v)}>
                 {sz.label}
               </button>
             ))}
@@ -142,32 +140,8 @@ export function CombineDialog() {
         </div>
 
         <label className="field">
-          <span>Video quality · {Math.round(o.quality * 100)}</span>
-          <input type="range" className="plain" min={0.6} max={1} step={0.01} value={o.quality} onChange={(e) => set({ quality: +e.target.value })} />
-        </label>
-
-        <div className="field">
-          <span>Folder</span>
-          <div className="dir-row">
-            <code title={o.dir}>{o.dir}</code>
-            <button
-              onClick={async () => {
-                const d = await open({ directory: true, defaultPath: o.dir });
-                if (typeof d === 'string') set({ dir: d });
-              }}
-            >
-              Change…
-            </button>
-          </div>
-        </div>
-
-        <label className="check">
-          <input type="checkbox" checked={addToLibrary} onChange={(e) => setAddToLibrary(e.target.checked)} />
-          Add the finished video to my library
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={o.openAfter} onChange={(e) => set({ openAfter: e.target.checked })} />
-          Open folder when done
+          <span>Quality · {Math.round(quality * 100)}</span>
+          <input type="range" className="plain" min={0.6} max={1} step={0.01} value={quality} onChange={(e) => setQuality(+e.target.value)} />
         </label>
 
         <div className="modal-actions">
@@ -175,7 +149,7 @@ export function CombineDialog() {
             Cancel
           </button>
           <button className="primary" disabled={!canRun} onClick={run}>
-            Combine
+            Make remix
           </button>
         </div>
       </div>

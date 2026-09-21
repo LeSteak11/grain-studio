@@ -98,6 +98,11 @@ const Tile = memo(function Tile({
       )}
       <div className="tile-meta">
         {photo.fav && <span className="fav">★</span>}
+        {photo.remix && (
+          <span className="remix-mark" title={`Remix of ${photo.remix.of.length} clips`}>
+            Remix
+          </span>
+        )}
         {edited && <span className="edited">{presetCode ?? 'Edited'}</span>}
       </div>
       <div className="tile-marks">

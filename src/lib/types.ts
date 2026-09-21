@@ -55,6 +55,16 @@ export interface Photo {
   dur?: number;
   /** The file has an audio track. */
   audio?: boolean;
+  /** Set when this clip was made by combining others. */
+  remix?: Remix;
+}
+
+/** Where a combined clip came from, kept so the join points can be shown on its timeline. */
+export interface Remix {
+  /** Source photo ids, in the order they play. Sources may later be removed. */
+  of: string[];
+  /** Seconds into this clip where each following part starts (never includes 0). */
+  joins: number[];
 }
 
 export const isVideo = (p: Photo) => p.kind === 'video';

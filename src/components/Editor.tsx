@@ -996,6 +996,7 @@ export function Editor() {
                 }}
                 strip={strip}
                 onPreview={drawPreview}
+                joins={photo.remix?.joins}
               />
               <SoundBar id={id} edit={edit} outDur={durationOf(photo, edit)} />
             </div>
