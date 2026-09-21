@@ -13,7 +13,7 @@ import {
   toggleLabel,
 } from '../lib/organize';
 import { store, useStore } from '../lib/store';
-import { createdOf, type Photo } from '../lib/types';
+import { createdOf, type Photo, kindWord } from '../lib/types';
 
 const fmtDate = (t: number) => new Date(t).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const fmtShort = (t: number) => new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -82,7 +82,7 @@ export function InfoPanel({ ids, embedded }: { ids: string[]; embedded?: boolean
             </div>
           </>
         ) : (
-          <div className="info-name">{sel.length} photos selected</div>
+          <div className="info-name">{sel.length} {kindWord(sel)} selected</div>
         )}
       </div>
 

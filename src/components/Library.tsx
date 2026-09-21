@@ -9,7 +9,7 @@ import { presetInfo } from '../lib/luts';
 import { createLabel, setPosted, toggleGroup, toggleLabel } from '../lib/organize';
 import { copyImage, dragOutGesture } from '../lib/share';
 import { dayKey, sortDate, store, useStore, visiblePhotos, type Sort } from '../lib/store';
-import { fmtTime, isEdited, isPosted, isVideo, type Label, type Photo, type Platform } from '../lib/types';
+import { fmtTime, isEdited, isPosted, isVideo, kindWord, type Label, type Photo, type Platform } from '../lib/types';
 import { durationOf } from '../lib/video';
 import { DEFAULT_EDIT } from '../lib/types';
 
@@ -120,6 +120,7 @@ const Tile = memo(function Tile({
 export function Library() {
   const photos = useStore(visiblePhotos);
   const total = useStore((s) => s.photos.length);
+  const libWord = useStore((s) => kindWord(s.photos, s.photos.length));
   const edits = useStore((s) => s.edits);
   const selection = useStore((s) => s.selection);
   const labels = useStore((s) => s.labels);
@@ -434,7 +435,7 @@ export function Library() {
 
       <footer className="statusbar">
         <span>
-          {photos.length} of {total} photos
+          {photos.length} of {total} {libWord}
           {selIds.length ? ` · ${selIds.length} selected` : ''}
           {` · ${store.get().photos.filter(isPosted).length} posted`}
         </span>

@@ -87,6 +87,13 @@ export const AUDIO_EXTS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga', 'op
 export const isAudioName = (name: string) => AUDIO_EXTS.includes((name.split('.').pop() ?? '').toLowerCase());
 
 
+/** "photos" / "clips" / "items", so a video never gets called a photo. */
+export function kindWord(list: Photo[], n = list.length): string {
+  const vids = list.filter(isVideo).length;
+  const word = vids === 0 ? 'photo' : vids === list.length ? 'clip' : 'item';
+  return n === 1 ? word : `${word}s`;
+}
+
 export function fmtTime(t: number): string {
   if (!Number.isFinite(t) || t < 0) t = 0;
   const m = Math.floor(t / 60);
