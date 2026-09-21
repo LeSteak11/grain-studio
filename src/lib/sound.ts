@@ -3,7 +3,8 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { fsx, paths } from './fs';
 import { clearBusy, setBusy, store, toast } from './store';
-import { AUDIO_EXTS, isAudioName, type EditState, type Track } from './types';
+import { VIDEO_EXTS } from './video';
+import { AUDIO_EXTS, isAudioName, isVideo, type EditState, type Photo, type Track } from './types';
 
 /** Everything is mixed and encoded at this rate, whatever the sources use. */
 const RATE = 48000;
@@ -125,6 +126,106 @@ export async function importAudioPaths(list: string[]) {
     clearBusy();
   }
   toast(ok ? `Added ${ok} sound${ok === 1 ? '' : 's'}` : 'Could not read those audio files');
+}
+
+/** Decoded audio as a 16-bit PCM WAV, so an extracted track is a plain file anything can read. */
+function encodeWav(buf: AudioBuffer): Uint8Array {
+  const chans = Math.min(2, buf.numberOfChannels);
+  const frames = buf.length;
+  const bytes = new Uint8Array(44 + frames * chans * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (at: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(at + i, text.charCodeAt(i));
+  };
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + frames * chans * 2, true);
+  ascii(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, chans, true);
+  view.setUint32(24, buf.sampleRate, true);
+  view.setUint32(28, buf.sampleRate * chans * 2, true);
+  view.setUint16(32, chans * 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, 'data');
+  view.setUint32(40, frames * chans * 2, true);
+  const src: Float32Array[] = [];
+  for (let c = 0; c < chans; c++) src.push(buf.getChannelData(c));
+  let at = 44;
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < chans; c++) {
+      const v = Math.max(-1, Math.min(1, src[c][i]));
+      view.setInt16(at, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+      at += 2;
+    }
+  }
+  return bytes;
+}
+
+/** Audio lifted off a video, held in memory so you can hear it before it joins the library. */
+export interface PendingSound {
+  name: string;
+  /** 16-bit PCM WAV. */
+  bytes: Uint8Array;
+  dur: number;
+  peaks: number[];
+  /** Object URL for the preview player; revoked when the sound is kept or dropped. */
+  url: string;
+}
+
+async function pendingFrom(name: string, videoBytes: Uint8Array): Promise<PendingSound> {
+  // decodeAudioData reads the audio track straight out of an MP4/MOV/WebM container.
+  const buf = await audioCtx().decodeAudioData(videoBytes.slice().buffer);
+  const bytes = encodeWav(buf);
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'audio/wav' }));
+  return { name: `${stripExt(name)} (audio)`, bytes, dur: buf.duration, peaks: peaksOf(buf), url };
+}
+
+/** File picker to a sound you can listen to before keeping. Null if it has no usable audio. */
+export async function pickVideoForAudio(): Promise<PendingSound | null> {
+  const sel = await open({ multiple: false, directory: false, filters: [{ name: 'Video', extensions: VIDEO_EXTS }] });
+  if (!sel || Array.isArray(sel)) return null;
+  const name = sel.split(/[\/]/).pop() ?? 'Clip';
+  setBusy('Reading the audio', 0, 0);
+  try {
+    return await pendingFrom(name, await fsx.readBytes(sel));
+  } catch (e) {
+    console.warn('extract failed', e);
+    toast('No audio track in that video, or the format is one Windows cannot decode');
+    return null;
+  } finally {
+    clearBusy();
+  }
+}
+
+/** Same thing for a clip already in the library. */
+export async function audioFromPhoto(photo: Photo): Promise<PendingSound | null> {
+  if (!isVideo(photo) || !photo.audio) {
+    toast('That clip has no audio track');
+    return null;
+  }
+  setBusy('Reading the audio', 0, 0);
+  try {
+    return await pendingFrom(photo.name, await fsx.readBytes(photo.file));
+  } catch (e) {
+    console.warn('extract failed', e);
+    toast('Could not read the audio on that clip');
+    return null;
+  } finally {
+    clearBusy();
+  }
+}
+
+export function discardPending(p: PendingSound | null) {
+  if (p) URL.revokeObjectURL(p.url);
+}
+
+/** Keeps a previewed sound: writes the WAV into the library and indexes it. */
+export async function keepPending(p: PendingSound, name?: string): Promise<Track | null> {
+  const track = await addTrack(p.bytes, 'wav', { name: name?.trim() || p.name, from: 'clip' });
+  URL.revokeObjectURL(p.url);
+  if (!track) toast('Could not save that sound');
+  return track;
 }
 
 export async function removeTrack(id: string) {

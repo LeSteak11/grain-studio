@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fileUrl } from '../lib/fs';
 import { commit, getEdit } from '../lib/history';
-import { pickAndImportAudio, removeTrack, renameTrack, toggleTrackFav } from '../lib/sound';
+import {
+  discardPending,
+  keepPending,
+  pickAndImportAudio,
+  pickVideoForAudio,
+  removeTrack,
+  renameTrack,
+  toggleTrackFav,
+  type PendingSound,
+} from '../lib/sound';
 import { NeedsKey, PROVIDERS, saveFound, searchSounds, type Found, type Provider } from '../lib/soundsearch';
 import { store, toast, useStore } from '../lib/store';
 import { fmtTime, type Track } from '../lib/types';
@@ -57,7 +66,33 @@ function MySounds({ onPick }: { onPick: ((t: Track) => void) | null }) {
   const tracks = useStore((s) => s.tracks);
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
+  /** Audio pulled off a video, waiting for you to keep or drop it. */
+  const [pending, setPending] = useState<PendingSound | null>(null);
+  const [pendingName, setPendingName] = useState('');
   const { playing, toggle } = usePreview();
+
+  const grabFromVideo = async () => {
+    const got = await pickVideoForAudio();
+    if (!got) return;
+    discardPending(pending);
+    setPending(got);
+    setPendingName(got.name);
+  };
+
+  const drop = () => {
+    discardPending(pending);
+    setPending(null);
+  };
+
+  const keep = async () => {
+    if (!pending) return;
+    const t = await keepPending(pending, pendingName);
+    setPending(null);
+    if (t) {
+      toast(`Saved ${t.name}`);
+      onPick?.(t);
+    }
+  };
 
   const list = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -76,10 +111,32 @@ function MySounds({ onPick }: { onPick: ((t: Track) => void) | null }) {
         <button className="ghost" onClick={() => void pickAndImportAudio()}>
           + Add files
         </button>
+        <button className="ghost" onClick={() => void grabFromVideo()} title="Pick a video and take its audio">
+          + From a video
+        </button>
       </div>
-      {!tracks.length && (
+
+      {pending && (
+        <div className="pending-sound">
+          <button className="icon play" onClick={() => toggle('pending', pending.url)} title="Listen">
+            {playing === 'pending' ? '❚❚' : '▶'}
+          </button>
+          <div className="sound-meta">
+            <input className="sound-rename" value={pendingName} onChange={(e) => setPendingName(e.target.value)} placeholder="Name this sound" />
+            <span className="sound-sub">{fmtTime(pending.dur)} · not saved yet</span>
+          </div>
+          <Wave peaks={pending.peaks} />
+          <button className="ghost" onClick={drop}>
+            Discard
+          </button>
+          <button className="primary" onClick={() => void keep()}>
+            Save to library
+          </button>
+        </div>
+      )}
+      {!tracks.length && !pending && (
         <p className="sound-empty">
-          No sounds yet. Add MP3s or WAVs from your computer, or search Jamendo and Freesound on the next tab.
+          No sounds yet. Add MP3s or WAVs, take the audio off a video, or search Jamendo and Freesound on the next tab.
         </p>
       )}
       <div className="sound-list">

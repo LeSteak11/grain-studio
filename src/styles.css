@@ -518,3 +518,6 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .sb-knobs label span { white-space: nowrap; }
 .sb-knobs label input { width: 78px; }
 .sb-knobs label b { font-weight: 500; color: var(--text); min-width: 34px; text-align: right; }
+.pending-sound { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--dim); border-radius: var(--r); background: var(--panel2); }
+.pending-sound .sound-meta { width: 220px; gap: 3px; }
+.pending-sound .ghost { padding: 6px 12px; font-size: 12px; flex: none; }
