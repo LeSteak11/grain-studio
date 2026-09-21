@@ -3,6 +3,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { bytesJob, pasteEdits, runImport, type ImportJob } from './library';
 import { store, toast, visiblePhotos } from './store';
+import { addTrack } from './sound';
+import { isAudioName } from './types';
 import { draggingOut } from './share';
 
 const IMG_URL = /\.(jpe?g|jfif|png|webp|avif|gif|bmp)(\?|#|$)/i;
@@ -92,6 +94,22 @@ async function walkEntry(entry: FileSystemEntry, out: File[], depth = 0): Promis
 }
 
 const isImageFile = (f: File) => f.type.startsWith('image/') || f.type.startsWith('video/') || MEDIA_FILE.test(f.name);
+const isAudioFile = (f: File) => (f.type.startsWith('audio/') || isAudioName(f.name)) && !isImageFile(f);
+
+/** Audio dropped on the window joins the sound library instead of the photo grid. */
+async function takeAudio(list: File[]): Promise<number> {
+  let ok = 0;
+  for (const f of list) {
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const ext = (f.name.split('.').pop() ?? 'mp3').toLowerCase();
+      if (await addTrack(bytes, ext, { name: f.name.replace(/\.[a-z0-9]{2,5}$/i, '') })) ok++;
+    } catch (e) {
+      console.warn('audio drop failed', f.name, e);
+    }
+  }
+  return ok;
+}
 
 /** Pulls everything out of a DataTransfer synchronously (it's wiped after the event), then imports. */
 function takeTransfer(dt: DataTransfer): (() => Promise<void>) | null {
@@ -109,10 +127,15 @@ function takeTransfer(dt: DataTransfer): (() => Promise<void>) | null {
         list = [];
         for (const e of entries) if (e) await walkEntry(e, list);
       }
+      const sounds = list.filter(isAudioFile);
+      if (sounds.length) {
+        const added = await takeAudio(sounds);
+        if (added) toast(`Added ${added} sound${added === 1 ? '' : 's'}`);
+      }
       const skip = new Set(store.get().photos.map((p) => `${p.name}|${p.size}`));
       const imgs = list.filter(isImageFile).filter((f) => !skip.has(`${f.name}|${f.size}`));
       if (!imgs.length) {
-        toast(list.length ? 'No new images in that drop' : 'Nothing to import');
+        if (!sounds.length) toast(list.length ? 'No new images in that drop' : 'Nothing to import');
         return;
       }
       await runImport(
@@ -165,7 +188,7 @@ export function installDropAndPaste() {
     if (!e.dataTransfer || store.get().modal || draggingOut) return;
     const run = takeTransfer(e.dataTransfer);
     if (run) void run().catch((err) => toast(`Import failed: ${err}`));
-    else toast("Couldn't find an image in that drop");
+    else toast("Couldn't find an image, video or sound in that drop");
   });
 
   // Ctrl+V: an image on the clipboard gets imported; otherwise it pastes copied edits.

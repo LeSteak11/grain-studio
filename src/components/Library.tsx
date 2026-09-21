@@ -274,6 +274,9 @@ export function Library() {
           <button className="ghost" onClick={() => fsx.openPath(paths.root())} title="Open library folder">
             Folder
           </button>
+          <button className="ghost" onClick={() => store.set({ modal: 'sounds', soundFor: null })}>
+            Sounds
+          </button>
           <button className="ghost" onClick={() => store.set({ modal: 'lab' })}>
             Preset Lab
           </button>

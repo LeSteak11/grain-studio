@@ -19,6 +19,9 @@ export const paths = {
   editedThumb: (id: string) => join(ROOT, 'thumbs', `${id}.e.jpg`),
   preview: (id: string) => join(ROOT, 'previews', `${id}.jpg`),
   dragDir: () => join(ROOT, 'drag'),
+  audioDir: () => join(ROOT, 'audio'),
+  audioFile: (id: string, ext: string) => join(ROOT, 'audio', `${id}.${ext}`),
+  sounds: () => join(ROOT, 'sounds.json'),
   lutsDir: () => join(ROOT, 'luts'),
   lut: (name: string) => join(ROOT, 'luts', `${name}.cube`),
   exports: () => join(ROOT, 'Exports'),
@@ -51,6 +54,8 @@ export const fsx = {
   convertHeic: (src: string, dst: string) => invoke<void>('convert_heic', { src, dst }),
   clearDir: (path: string) => invoke<void>('clear_dir', { path }),
   exists: (path: string) => invoke<boolean>('path_exists', { path }),
+  fetchText: (url: string, auth?: string) => invoke<string>('fetch_text', { url, auth: auth ?? null }),
+  download: async (url: string) => new Uint8Array(await invoke<ArrayBuffer>('download_url', { url })),
 };
 
 export function fileUrl(path: string, rev?: number): string {

@@ -1,7 +1,8 @@
 // Drives the video render worker: one clip at a time, one job per segment.
 import { fsx } from './fs';
 import { getLut } from './luts';
-import { audioSlice, segmentsOf } from './video';
+import { segmentsOf } from './video';
+import { dropDecoded, mixSegment } from './sound';
 import { buildTextLayer, layerSize } from './textlayer';
 import { outputDims } from './geometry';
 import type { EditState, Photo } from './types';
@@ -47,9 +48,14 @@ export async function renderVideo(photo: Photo, edit: EditState, opts: VideoOpts
   const segs = segmentsOf(edit, photo.dur ?? 0);
   const lut = await getLut(edit.preset);
   const out: Uint8Array[] = [];
+  // Soundtrack fades and looping span the whole export, so each segment needs to know
+  // how much finished video comes before it and how long the finished video runs.
+  const total = segs.reduce((a, sg) => a + (sg.end - sg.start), 0);
+  let elapsed = 0;
   for (let i = 0; i < segs.length; i++) {
     const seg = segs[i];
-    const audio = photo.audio && !edit.mute ? await audioSlice(bytes, seg.start, seg.end, edit.volume) : null;
+    const audio = await mixSegment(`v:${photo.id}`, photo.audio ? bytes : null, edit, seg, elapsed, total);
+    elapsed += seg.end - seg.start;
     const id = ++seq;
     const [ow, oh] = outputDims(edit, photo.w, photo.h);
     const scale = opts.maxEdge ? Math.min(1, opts.maxEdge / Math.max(ow, oh)) : 1;
@@ -65,5 +71,6 @@ export async function renderVideo(photo: Photo, edit: EditState, opts: VideoOpts
     });
     out.push(new Uint8Array(buf));
   }
+  dropDecoded(`v:${photo.id}`);
   return out;
 }

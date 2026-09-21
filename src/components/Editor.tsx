@@ -19,7 +19,10 @@ import { getThumbBitmap } from '../lib/thumbs';
 import { ASPECTS, aspectPx, clamp, fitCrop, orientedDims, outputDims } from '../lib/geometry';
 import { DEFAULT_EDIT, FULL_CROP, defaultEdit, fmtTime, isEdited, isVideo, type EditState } from '../lib/types';
 import { VideoTimeline } from './VideoTimeline';
-import { segmentsOf } from '../lib/video';
+import { durationOf, segmentsOf } from '../lib/video';
+import { SoundBar } from './SoundBar';
+import { trackById } from '../lib/sound';
+import { fileUrl } from '../lib/fs';
 import { buildTextLayer, layerSize } from '../lib/textlayer';
 import { fsx, paths } from '../lib/fs';
 import { dropThumbBitmap } from '../lib/thumbs';
@@ -60,6 +63,8 @@ export function Editor() {
   const vidRef = useRef<HTMLVideoElement>(null);
   /** Second decoder used only for timeline scrubbing, so playback isn't disturbed. */
   const scrubRef = useRef<HTMLVideoElement>(null);
+  /** Plays the attached soundtrack in step with the preview. */
+  const sndRef = useRef<HTMLAudioElement>(null);
   const scrubJob = useRef<{ t: number; c: HTMLCanvasElement } | null>(null);
   const scrubBusy = useRef(false);
   const [strip, setStrip] = useState<string[]>([]);
@@ -482,13 +487,72 @@ export function Editor() {
     };
   }, [isVid, showFrame]);
 
-  // Volume/mute follow the clip's settings.
+  // Volume/mute follow the clip's settings; a soundtrack ducks the clip's own audio.
   useEffect(() => {
     const v = vidRef.current;
     if (!v) return;
     v.muted = edit.mute;
-    v.volume = Math.min(1, Math.max(0, edit.volume));
-  }, [edit.mute, edit.volume]);
+    v.volume = Math.min(1, Math.max(0, edit.volume * (edit.sound ? edit.soundDuck : 1)));
+  }, [edit.mute, edit.volume, edit.sound, edit.soundDuck]);
+
+  // Load the soundtrack file whenever the chosen track changes.
+  useEffect(() => {
+    const a = sndRef.current;
+    if (!a) return;
+    const t = trackById(edit.sound);
+    const src = t ? fileUrl(t.file) : '';
+    if (a.src !== src) {
+      a.pause();
+      if (src) a.src = src;
+      else a.removeAttribute('src');
+    }
+    a.loop = true;
+  }, [edit.sound]);
+
+  useEffect(() => {
+    const a = sndRef.current;
+    if (a) a.volume = Math.min(1, Math.max(0, edit.soundVolume));
+  }, [edit.soundVolume]);
+
+  // Keep the soundtrack in step with the preview. Fades are applied on export, not here.
+  useEffect(() => {
+    const v = vidRef.current;
+    const a = sndRef.current;
+    if (!v || !a || !isVid) return;
+    const sync = () => {
+      const L = live.current;
+      if (!L.edit.sound || !a.duration) return;
+      // Where we are in the finished clip maps straight onto the track.
+      const into = Math.max(0, v.currentTime - L.edit.trimIn);
+      const want = (L.edit.soundStart + into) % Math.max(0.05, a.duration);
+      if (Math.abs(a.currentTime - want) > 0.12) a.currentTime = want;
+    };
+    const onPlay = () => {
+      if (!live.current.edit.sound) return;
+      sync();
+      void a.play().catch(() => undefined);
+    };
+    const onPause = () => a.pause();
+    const onSeeked = () => {
+      sync();
+      if (v.paused) a.pause();
+    };
+    v.addEventListener('play', onPlay);
+    v.addEventListener('pause', onPause);
+    v.addEventListener('seeked', onSeeked);
+    return () => {
+      v.removeEventListener('play', onPlay);
+      v.removeEventListener('pause', onPause);
+      v.removeEventListener('seeked', onSeeked);
+      a.pause();
+    };
+  }, [isVid]);
+
+  // Taking the soundtrack off (or swapping it) should stop whatever is still playing.
+  useEffect(() => {
+    const a = sndRef.current;
+    if (a && !edit.sound) a.pause();
+  }, [edit.sound]);
 
   // Build the text overlay whenever the text or the frame shape changes.
   useEffect(() => {
@@ -839,6 +903,7 @@ export function Editor() {
             <div className="frame" ref={frameRef}>
               <video ref={vidRef} className="hidden-video" muted={edit.mute} playsInline preload="auto" />
               <video ref={scrubRef} className="hidden-video" muted playsInline preload="auto" />
+              <audio ref={sndRef} className="hidden-video" preload="auto" />
               <canvas ref={canvasRef} onDoubleClick={isVid ? undefined : onCanvasDouble} onClick={isVid && !cropMode ? () => !dragged.current && togglePlay() : undefined} onPointerDown={onCanvasDown} />
               {split !== null && !cropMode && (
                 <div className="split-line" style={{ left: `${split * 100}%` }} onPointerDown={onSplitDown}>
@@ -892,6 +957,13 @@ export function Editor() {
                 <button className="ghost" onClick={splitHere} title="Split here (X)">
                   ✂ Split
                 </button>
+                <button
+                  className={`ghost${edit.sound ? ' on' : ''}`}
+                  onClick={() => store.set({ modal: 'sounds', soundFor: id })}
+                  title="Lay a song or sound effect over this clip"
+                >
+                  ♪ Sound
+                </button>
                 <button className="ghost" onClick={() => void setCover()} title="Use this frame as the library thumbnail">
                   Set cover
                 </button>
@@ -925,6 +997,7 @@ export function Editor() {
                 strip={strip}
                 onPreview={drawPreview}
               />
+              <SoundBar id={id} edit={edit} outDur={durationOf(photo, edit)} />
             </div>
           )}
           <div className="filmstrip" ref={stripRef}>

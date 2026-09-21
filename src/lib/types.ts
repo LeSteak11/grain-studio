@@ -59,6 +59,34 @@ export interface Photo {
 
 export const isVideo = (p: Photo) => p.kind === 'video';
 
+/** A song or sound effect in the sound library, stored under <root>/audio. */
+export interface Track {
+  id: string;
+  /** Absolute path of the library copy. */
+  file: string;
+  name: string;
+  artist?: string;
+  size: number;
+  /** Length in seconds. */
+  dur: number;
+  added: number;
+  fav?: boolean;
+  /** Free-text tags: genre, mood, "sfx". */
+  tags?: string[];
+  /** Where it came from: 'local', 'jamendo', 'freesound'. */
+  from?: string;
+  /** Licence line and credit link, kept so you can attribute it. */
+  license?: string;
+  url?: string;
+  /** ~320 peak buckets, 0..1, cached so the waveform draws instantly. */
+  peaks?: number[];
+}
+
+export const AUDIO_EXTS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga', 'opus', 'wma'];
+
+export const isAudioName = (name: string) => AUDIO_EXTS.includes((name.split('.').pop() ?? '').toLowerCase());
+
+
 export function fmtTime(t: number): string {
   if (!Number.isFinite(t) || t < 0) t = 0;
   const m = Math.floor(t / 60);
@@ -162,6 +190,15 @@ export interface EditState {
   splits: number[];
   mute: boolean;
   volume: number;
+  /** Soundtrack: id of a Track laid over the clip (null = none). */
+  sound: string | null;
+  /** Seconds into the track where the soundtrack starts. */
+  soundStart: number;
+  soundVolume: number;
+  soundFadeIn: number;
+  soundFadeOut: number;
+  /** How loud the clip's own audio stays under the soundtrack (0 = replaced). */
+  soundDuck: number;
   text: TextStyle;
   crop: Crop;
   aspect: string;
@@ -244,6 +281,12 @@ export const DEFAULT_EDIT: EditState = {
   splits: [],
   mute: false,
   volume: 1,
+  sound: null,
+  soundStart: 0,
+  soundVolume: 1,
+  soundFadeIn: 0,
+  soundFadeOut: 0.5,
+  soundDuck: 0,
   text: DEFAULT_TEXT,
   curve: { rgb: IDENTITY_CURVE, r: IDENTITY_CURVE, g: IDENTITY_CURVE, b: IDENTITY_CURVE },
   crop: FULL_CROP,
@@ -266,6 +309,7 @@ export function normalizeEdit(raw: unknown): EditState {
     if (k in r && typeof r[k] === typeof (d as unknown as Record<string, unknown>)[k]) out[k] = r[k];
   }
   out.preset = typeof r.preset === 'string' ? r.preset : null;
+  out.sound = typeof r.sound === 'string' ? r.sound : null;
   out.hsl = Array.isArray(r.hsl) && r.hsl.length === 18 ? r.hsl.map(Number) : d.hsl;
   out.text = r.text && typeof r.text === 'object' ? { ...DEFAULT_TEXT, ...(r.text as object) } : d.text;
   out.splits = Array.isArray(r.splits) ? r.splits.filter((n) => typeof n === 'number' && n > 0).sort((a, b) => a - b) : [];
@@ -297,7 +341,7 @@ export function hasGeometry(e: EditState): boolean {
 
 /** Trim/split/mute changes count as edits for videos. */
 export function hasVideoEdit(e: EditState): boolean {
-  return e.trimIn > 0.001 || e.trimOut > 0.001 || e.splits.length > 0 || e.mute || e.volume !== 1;
+  return e.trimIn > 0.001 || e.trimOut > 0.001 || e.splits.length > 0 || e.mute || e.volume !== 1 || !!e.sound;
 }
 
 export function hasCurve(e: EditState): boolean {
@@ -340,6 +384,12 @@ export function withGeometryOf(src: EditState, target: EditState): EditState {
     splits: [...target.splits],
     mute: target.mute,
     volume: target.volume,
+    sound: target.sound,
+    soundStart: target.soundStart,
+    soundVolume: target.soundVolume,
+    soundFadeIn: target.soundFadeIn,
+    soundFadeOut: target.soundFadeOut,
+    soundDuck: target.soundDuck,
     crop: { ...target.crop },
     aspect: target.aspect,
     rotate: target.rotate,

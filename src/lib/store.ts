@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_PLATFORMS, createdOf, isEdited, isPosted, type EditState, type Group, type Label, type Photo, type Platform, type Recipe } from './types';
+import { DEFAULT_PLATFORMS, createdOf, isEdited, isPosted, type EditState, type Group, type Label, type Photo, type Platform, type Recipe, type Track } from './types';
 
 export type FilterKind = 'all' | 'photos' | 'videos' | 'fav' | 'edited' | 'unedited' | 'posted' | 'unposted' | 'group' | 'label' | 'unlabeled' | 'month';
 export interface Filter {
@@ -29,6 +29,10 @@ export interface AppState {
   /** Names of user LUTs in the luts folder (id = "u:" + name). */
   luts: string[];
   recipes: Recipe[];
+  /** The sound library: songs and effects you can lay over a clip. */
+  tracks: Track[];
+  /** API keys for online sound search; blank until you paste one in. */
+  soundKeys: { jamendo: string; freesound: string };
   /** Preset ids starred by the user (shown first). */
   favPresets: string[];
   view: 'library' | 'editor';
@@ -47,8 +51,10 @@ export interface AppState {
   clipboard: EditState | null;
   busy: Busy | null;
   toast: string | null;
-  modal: null | 'export' | 'lab';
+  modal: null | 'export' | 'lab' | 'sounds';
   exportIds: string[];
+  /** Clip the sound picker is choosing a soundtrack for (null = just browsing). */
+  soundFor: string | null;
   dragOver: boolean;
   saving: boolean;
 }
@@ -79,6 +85,8 @@ let state: AppState = {
   edits: {},
   luts: [],
   recipes: [],
+  tracks: [],
+  soundKeys: { jamendo: '', freesound: '' },
   favPresets: [],
   view: 'library',
   currentId: null,
@@ -98,6 +106,7 @@ let state: AppState = {
   toast: null,
   modal: null,
   exportIds: [],
+  soundFor: null,
   dragOver: false,
   saving: false,
 };

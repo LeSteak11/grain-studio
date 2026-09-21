@@ -1,4 +1,4 @@
-// Video support: thumbnails, playback sources, trim/split maths, audio extraction.
+// Video support: thumbnails, playback sources and trim/split maths. Audio mixing lives in sound.ts.
 import { THUMB_EDGE } from './thumbs';
 import type { EditState, Photo } from './types';
 
@@ -104,28 +104,3 @@ export const durationOf = (p: Photo, e: EditState) => {
   const segs = segmentsOf(e, p.dur ?? 0);
   return segs.reduce((a, s) => a + (s.end - s.start), 0);
 };
-
-/** Decodes the audio track and returns the trimmed range as planar PCM (null when there's no audio). */
-export async function audioSlice(bytes: Uint8Array, start: number, end: number, volume: number): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
-  let ctx: AudioContext | null = null;
-  try {
-    ctx = new AudioContext();
-    const copy = bytes.slice().buffer;
-    const buf = await ctx.decodeAudioData(copy);
-    const rate = buf.sampleRate;
-    const from = Math.max(0, Math.floor(start * rate));
-    const to = Math.min(buf.length, Math.ceil(end * rate));
-    if (to <= from) return null;
-    const channels: Float32Array[] = [];
-    for (let c = 0; c < buf.numberOfChannels; c++) {
-      const slice = buf.getChannelData(c).slice(from, to);
-      if (volume !== 1) for (let i = 0; i < slice.length; i++) slice[i] *= volume;
-      channels.push(slice);
-    }
-    return { channels, sampleRate: rate };
-  } catch {
-    return null;
-  } finally {
-    void ctx?.close();
-  }
-}

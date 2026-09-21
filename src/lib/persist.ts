@@ -17,6 +17,8 @@ let lastFavs = store.get().favPresets;
 let lastLabels = store.get().labels;
 let lastGroups = store.get().groups;
 let lastPlatforms = store.get().platforms;
+let lastTracks = store.get().tracks;
+let lastSoundKeys = store.get().soundKeys;
 
 function updateSaving() {
   const saving = timers.size > 0 || inflight.size > 0;
@@ -65,7 +67,12 @@ async function writeCollections() {
 }
 
 async function writePrefs() {
-  await fsx.writeText(paths.prefs(), JSON.stringify({ favPresets: store.get().favPresets }));
+  const s = store.get();
+  await fsx.writeText(paths.prefs(), JSON.stringify({ favPresets: s.favPresets, soundKeys: s.soundKeys }));
+}
+
+async function writeSounds() {
+  await fsx.writeText(paths.sounds(), JSON.stringify({ version: 1, tracks: store.get().tracks }));
 }
 
 async function writeRecipes() {
@@ -82,6 +89,8 @@ function onChange() {
     lastLabels = s.labels;
     lastGroups = s.groups;
     lastPlatforms = s.platforms;
+    lastTracks = s.tracks;
+    lastSoundKeys = s.soundKeys;
     return;
   }
   if (s.edits !== lastEdits) {
@@ -103,9 +112,14 @@ function onChange() {
     lastPlatforms = s.platforms;
     schedule('coll', LIB_DELAY, writeCollections);
   }
-  if (s.favPresets !== lastFavs) {
+  if (s.favPresets !== lastFavs || s.soundKeys !== lastSoundKeys) {
     lastFavs = s.favPresets;
+    lastSoundKeys = s.soundKeys;
     schedule('prefs', LIB_DELAY, writePrefs);
+  }
+  if (s.tracks !== lastTracks) {
+    lastTracks = s.tracks;
+    schedule('snd', LIB_DELAY, writeSounds);
   }
 }
 

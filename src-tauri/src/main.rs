@@ -103,7 +103,7 @@ fn library_root(app: tauri::AppHandle) -> Result<String, String> {
         .or_else(|_| app.path().home_dir())
         .map_err(err)?;
     let root = base.join("Grain Studio");
-    for d in ["originals", "thumbs", "previews", "edits", "luts", "Exports", "drag"] {
+    for d in ["originals", "thumbs", "previews", "edits", "luts", "Exports", "drag", "audio"] {
         fs::create_dir_all(root.join(d)).map_err(err)?;
     }
     Ok(root.to_string_lossy().into_owned())
@@ -347,6 +347,32 @@ async fn download_url(url: String) -> Result<Response, String> {
     .map_err(err)?
 }
 
+/// Plain GET returning text, for the sound-search APIs (native side = no CORS).
+/// `auth` becomes the Authorization header when present.
+#[tauri::command]
+async fn fetch_text(url: String, auth: Option<String>) -> Result<String, String> {
+    if !url.starts_with("https://") {
+        return Err("only https links can be fetched".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut req = ureq::get(&url)
+            .set("User-Agent", "GrainStudio/1.0")
+            .set("Accept", "application/json")
+            .timeout(std::time::Duration::from_secs(20));
+        if let Some(a) = auth.as_deref() {
+            req = req.set("Authorization", a);
+        }
+        match req.call() {
+            Ok(resp) => resp.into_string().map_err(err),
+            // The APIs explain refusals in the body, so pass those through instead of a bare status.
+            Err(ureq::Error::Status(_, resp)) => resp.into_string().map_err(err),
+            Err(e) => Err(err(e)),
+        }
+    })
+    .await
+    .map_err(err)?
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     std::process::Command::new("explorer").arg(path).spawn().map(|_| ()).map_err(err)
@@ -360,6 +386,7 @@ fn main() {
             library_root,
             read_text,
             write_text,
+            fetch_text,
             read_all_text,
             list_dir,
             read_bytes,

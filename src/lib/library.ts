@@ -27,6 +27,7 @@ import {
   type Photo,
   type Platform,
   type Recipe,
+  type Track,
 } from './types';
 
 export const IMAGE_EXTS = ['jpg', 'jpeg', 'jfif', 'png', 'webp', 'bmp', 'gif', 'avif', 'heic', 'heif', ...VIDEO_EXTS];
@@ -35,13 +36,14 @@ export async function initApp() {
   try {
     const root = await fsx.root();
     setRoot(root);
-    const [libTxt, editsRaw, recTxt, luts, prefsTxt, collTxt] = await Promise.all([
+    const [libTxt, editsRaw, recTxt, luts, prefsTxt, collTxt, sndTxt] = await Promise.all([
       fsx.readText(paths.library()),
       fsx.readAllText(paths.editsDir(), 'json'),
       fsx.readText(paths.recipes()),
       fsx.listDir(paths.lutsDir(), 'cube'),
       fsx.readText(paths.prefs()),
       fsx.readText(paths.collections()),
+      fsx.readText(paths.sounds()),
     ]);
     let photos: Photo[] = [];
     try {
@@ -65,10 +67,19 @@ export async function initApp() {
       recipes = [];
     }
     let favPresets: string[] = [];
+    let soundKeys = { jamendo: '', freesound: '' };
     try {
-      favPresets = prefsTxt ? (JSON.parse(prefsTxt).favPresets ?? []) : [];
+      const pr = prefsTxt ? JSON.parse(prefsTxt) : {};
+      favPresets = pr.favPresets ?? [];
+      if (pr.soundKeys) soundKeys = { jamendo: String(pr.soundKeys.jamendo ?? ''), freesound: String(pr.soundKeys.freesound ?? '') };
     } catch {
       favPresets = [];
+    }
+    let tracks: Track[] = [];
+    try {
+      tracks = sndTxt ? (JSON.parse(sndTxt).tracks ?? []) : [];
+    } catch {
+      console.error('sounds.json unreadable');
     }
     let labels: Label[] = DEFAULT_LABELS;
     let groups: Group[] = [];
@@ -125,7 +136,7 @@ export async function initApp() {
     }
 
     startPersistence();
-    store.set({ ready: true, root, photos, edits, recipes, luts, favPresets, labels, groups, platforms });
+    store.set({ ready: true, root, photos, edits, recipes, luts, favPresets, labels, groups, platforms, tracks, soundKeys });
     void fsx.clearDir(paths.dragDir()).catch(() => undefined);
 
     installDropAndPaste();

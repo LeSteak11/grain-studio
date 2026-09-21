@@ -3,6 +3,7 @@ import { Library } from './components/Library';
 import { Editor } from './components/Editor';
 import { ExportDialog } from './components/ExportDialog';
 import { PresetLab } from './components/PresetLab';
+import { SoundPicker } from './components/SoundPicker';
 import { PostPrompt } from './components/PostPrompt';
 import { initApp } from './lib/library';
 import { useStore } from './lib/store';
@@ -60,6 +61,7 @@ export default function App() {
       {view === 'editor' ? <Editor /> : <Library />}
       {modal === 'export' && <ExportDialog />}
       {modal === 'lab' && <PresetLab />}
+      {modal === 'sounds' && <SoundPicker />}
       {dragOver && <div className="drop-hint">Drop to import</div>}
       <PostPrompt />
       <Busy />
