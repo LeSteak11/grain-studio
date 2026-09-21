@@ -45,4 +45,19 @@ export function fitCrop(ratioPx: number, W: number, H: number): Crop {
   return rn >= 1 ? { x: 0, y: (1 - 1 / rn) / 2, w: 1, h: 1 / rn } : { x: (1 - rn) / 2, y: 0, w: rn, h: 1 };
 }
 
+/**
+ * Shrinks a crop to the given pixel aspect, centred inside whatever framing is already
+ * there. Used when clips of different shapes are joined into one output size.
+ */
+export function cropToAspect(crop: Crop, ratioPx: number, W: number, H: number): Crop {
+  const cur = (crop.w * W) / (crop.h * H);
+  if (!Number.isFinite(cur) || Math.abs(cur - ratioPx) < 1e-3) return crop;
+  if (cur > ratioPx) {
+    const w = crop.w * (ratioPx / cur);
+    return { x: crop.x + (crop.w - w) / 2, y: crop.y, w, h: crop.h };
+  }
+  const h = crop.h * (cur / ratioPx);
+  return { x: crop.x, y: crop.y + (crop.h - h) / 2, w: crop.w, h };
+}
+
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));

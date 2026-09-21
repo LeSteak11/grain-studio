@@ -521,3 +521,15 @@ input.size::-webkit-slider-runnable-track, input.plain::-webkit-slider-runnable-
 .pending-sound { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--dim); border-radius: var(--r); background: var(--panel2); }
 .pending-sound .sound-meta { width: 220px; gap: 3px; }
 .pending-sound .ghost { padding: 6px 12px; font-size: 12px; flex: none; }
+
+/* ---- Combine clips ---- */
+.modal.combine { width: 520px; }
+.combine-list { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; margin: 0 -6px 6px; padding: 0 6px; }
+.combine-row { display: flex; align-items: center; gap: 9px; padding: 5px 6px; border-radius: var(--r); }
+.combine-row:hover { background: var(--panel2); }
+.combine-num { width: 16px; text-align: right; font-size: 11px; color: var(--faint); flex: none; }
+.combine-row img { width: 54px; height: 36px; object-fit: cover; border-radius: 4px; background: var(--panel2); flex: none; }
+.combine-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.combine-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.combine-meta .dim { font-size: 11px; }
+.combine-row .icon { min-width: 26px; height: 26px; font-size: 13px; }

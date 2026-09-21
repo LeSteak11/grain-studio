@@ -51,8 +51,10 @@ export interface AppState {
   clipboard: EditState | null;
   busy: Busy | null;
   toast: string | null;
-  modal: null | 'export' | 'lab' | 'sounds';
+  modal: null | 'export' | 'lab' | 'sounds' | 'combine';
   exportIds: string[];
+  /** Clips queued for a combined render, in the order they will play. */
+  combineIds: string[];
   /** Clip the sound picker is choosing a soundtrack for (null = just browsing). */
   soundFor: string | null;
   dragOver: boolean;
@@ -106,6 +108,7 @@ let state: AppState = {
   toast: null,
   modal: null,
   exportIds: [],
+  combineIds: [],
   soundFor: null,
   dragOver: false,
   saving: false,

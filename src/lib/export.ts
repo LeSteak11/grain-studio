@@ -2,7 +2,7 @@ import { baseName, fsx, join } from './fs';
 import { getLut } from './luts';
 import { clearBusy, setBusy, store, toast } from './store';
 import { DEFAULT_EDIT, isVideo } from './types';
-import { renderVideo } from './videoexport';
+import { renderSequence, renderVideo, sequenceDuration, type SeqItem } from './videoexport';
 import { segmentsOf } from './video';
 import { buildTextLayer, layerSize } from './textlayer';
 import { outputDims } from './geometry';
@@ -118,4 +118,41 @@ export async function exportPhotos(ids: string[], o: ExportOpts, names?: string[
   const ok = done - failed;
   toast(failed ? `Exported ${ok}, ${failed} failed` : `Exported ${ok} photo${ok === 1 ? '' : 's'}`);
   if (o.openAfter && ok) await fsx.openPath(o.dir);
+}
+
+/** Renders several clips into one MP4, in the order given. */
+export async function combineClips(ids: string[], aspect: string, o: ExportOpts, name: string, addToLibrary: boolean) {
+  if (running) {
+    toast('An export is already running');
+    return;
+  }
+  const photos = ids.map((id) => store.get().photos.find((p) => p.id === id)).filter((p): p is NonNullable<typeof p> => !!p && isVideo(p));
+  if (photos.length < 2) {
+    toast('Pick at least two clips to combine');
+    return;
+  }
+  const items: SeqItem[] = photos.map((photo) => ({ photo, edit: store.get().edits[photo.id] ?? DEFAULT_EDIT }));
+  running = true;
+  setBusy('Combining', 0, 0);
+  try {
+    const bytes = await renderSequence(items, aspect, { maxEdge: o.size, quality: o.quality }, (p) =>
+      setBusy('Combining', Math.round(p * 100), 100),
+    );
+    const file = join(o.dir, `${name}.mp4`);
+    const written = await fsx.writeBytes(file, bytes, true);
+    const mins = Math.round(sequenceDuration(items));
+    toast(`Combined ${items.length} clips into one ${mins}s video`);
+    if (addToLibrary) {
+      const { bytesJob, runImport } = await import('./library');
+      await runImport([bytesJob(name, async () => bytes)], false);
+    }
+    if (o.openAfter) await fsx.openPath(o.dir);
+    return written;
+  } catch (err) {
+    console.error('combine failed', err);
+    toast(`Couldn't combine those clips: ${err instanceof Error ? err.message : err}`);
+  } finally {
+    running = false;
+    clearBusy();
+  }
 }

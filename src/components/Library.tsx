@@ -133,6 +133,8 @@ export function Library() {
 
   const gridRef = useRef<HTMLElement>(null);
   const selIds = photos.filter((p) => selection.has(p.id)).map((p) => p.id);
+  // Combine order follows the grid, so what you see is the order they play in.
+  const selClips = photos.filter((p) => selection.has(p.id) && p.kind === 'video').map((p) => p.id);
   const byDate = sort !== 'name';
 
   // Rows of the grid: day headers interleaved with photos when sorting by date.
@@ -359,6 +361,11 @@ export function Library() {
         </button>
         <button onClick={() => resetEdits(selIds)}>Revert</button>
         <button onClick={() => openExport(selIds)}>Export</button>
+        {selClips.length >= 2 && (
+          <button onClick={() => store.set({ modal: 'combine', combineIds: selClips })} title="Join these clips into one video">
+            Combine
+          </button>
+        )}
         <button className="danger" onClick={() => void removePhotos(selIds)}>
           Remove
         </button>

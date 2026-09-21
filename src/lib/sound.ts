@@ -341,6 +341,65 @@ export async function mixSegment(
   return { channels, sampleRate: RATE };
 }
 
+/** One clip's slot in a combined render. */
+export interface SeqPart {
+  key: string;
+  bytes: Uint8Array | null;
+  edit: EditState;
+  start: number;
+  end: number;
+}
+
+/**
+ * Audio for a combined render: every part mixed in turn and laid end to end, with one
+ * soundtrack running across the whole thing rather than restarting at each join.
+ */
+export async function mixSequence(parts: SeqPart[]): Promise<MixedAudio | null> {
+  const total = parts.reduce((a, p) => a + Math.max(0, p.end - p.start), 0);
+  if (total < 0.01) return null;
+  // The first part carrying a soundtrack sets it for the whole output.
+  const owner = parts.find((p) => p.edit.sound)?.edit;
+  const chunks: { channels: Float32Array[]; frames: number }[] = [];
+  let elapsed = 0;
+  let any = false;
+  for (const part of parts) {
+    const len = Math.max(0, part.end - part.start);
+    const frames = Math.max(0, Math.round(len * RATE));
+    const edit: EditState = owner
+      ? {
+          ...part.edit,
+          sound: owner.sound,
+          soundStart: owner.soundStart,
+          soundVolume: owner.soundVolume,
+          soundFadeIn: owner.soundFadeIn,
+          soundFadeOut: owner.soundFadeOut,
+          soundDuck: owner.soundDuck,
+        }
+      : part.edit;
+    const got = await mixSegment(part.key, part.bytes, edit, { start: part.start, end: part.end }, elapsed, total);
+    if (got) {
+      any = true;
+      chunks.push({ channels: got.channels, frames });
+    } else {
+      chunks.push({ channels: [], frames });
+    }
+    elapsed += len;
+  }
+  if (!any) return null;
+  const totalFrames = chunks.reduce((a, c) => a + c.frames, 0);
+  const out = [new Float32Array(totalFrames), new Float32Array(totalFrames)];
+  let at = 0;
+  for (const c of chunks) {
+    for (let ch = 0; ch < 2; ch++) {
+      // A part with no audio of its own simply leaves silence in place.
+      const src = c.channels[ch] ?? c.channels[0];
+      if (src) out[ch].set(src.subarray(0, Math.min(src.length, c.frames)), at);
+    }
+    at += c.frames;
+  }
+  return { channels: out, sampleRate: RATE };
+}
+
 /** Peaks for a track, computed on demand for anything indexed before peaks existed. */
 export async function ensurePeaks(id: string): Promise<number[] | null> {
   const t = trackById(id);

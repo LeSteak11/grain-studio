@@ -22,8 +22,30 @@ interface Job {
   text: ImageBitmap | null;
 }
 
+/** One clip in a combined render. */
+interface Part {
+  bytes: ArrayBuffer;
+  edit: EditState;
+  lut: Lut | null;
+  start: number;
+  end: number;
+  text: ImageBitmap | null;
+}
+
+/** Several clips joined into one file. The output size is decided on the main thread. */
+interface SeqJob {
+  id: number;
+  kind: 'seq';
+  parts: Part[];
+  W: number;
+  H: number;
+  fps: number;
+  quality: number;
+  audio: { channels: Float32Array[]; sampleRate: number } | null;
+}
+
 const ctx = self as unknown as {
-  onmessage: ((e: MessageEvent<Job>) => void) | null;
+  onmessage: ((e: MessageEvent<Job | SeqJob>) => void) | null;
   postMessage: (msg: unknown, transfer?: Transferable[]) => void;
 };
 
@@ -84,6 +106,187 @@ function demux(bytes: ArrayBuffer) {
   if (error) throw new Error(error);
   if (!track) throw new Error('no video track found');
   return { track, samples, description: descriptionOf(file, track.id) };
+}
+
+/** Encodes already-mixed planar PCM into the muxer's audio track. */
+async function addAudio(muxer: Muxer<ArrayBufferTarget>, audio: { channels: Float32Array[]; sampleRate: number }, fail: (e: Error) => void) {
+  const { channels, sampleRate } = audio;
+  const chCount = channels.length;
+  const total = channels[0]?.length ?? 0;
+  let broke: Error | null = null;
+  const stop = (e: Error) => {
+    broke = e;
+    fail(e);
+  };
+  const aenc = new AudioEncoder({
+    output: (chunk, meta) => {
+      try {
+        muxer.addAudioChunk(chunk, meta);
+      } catch (e) {
+        stop(e as Error);
+      }
+    },
+    error: (e) => stop(e as Error),
+  });
+  aenc.configure({ codec: 'mp4a.40.2', sampleRate, numberOfChannels: chCount, bitrate: 160_000 });
+  const N = 1024;
+  for (let off = 0; off < total; off += N) {
+    if (broke) break;
+    const n = Math.min(N, total - off);
+    const data = new Float32Array(n * chCount);
+    for (let c = 0; c < chCount; c++) data.set(channels[c].subarray(off, off + n), c * n);
+    const ad = new AudioData({ format: 'f32-planar', sampleRate, numberOfFrames: n, numberOfChannels: chCount, timestamp: Math.round((off / sampleRate) * 1e6), data });
+    aenc.encode(ad);
+    ad.close();
+    if (aenc.encodeQueueSize > 24) await sleep(2);
+  }
+  await aenc.flush();
+  aenc.close();
+}
+
+const fpsOf = (samples: Sample[]) => Math.max(1, Math.min(120, Math.round(1 / (samples[0].duration / samples[0].timescale || 1 / 30))));
+
+/**
+ * Decodes one part's trimmed range, handing each in-range frame to `emit`. The caller
+ * owns the encoder, so `busy` lets it apply backpressure.
+ */
+async function decodePart(
+  part: Part,
+  emit: (frame: VideoFrame, edit: EditState, startUs: number, fps: number) => void,
+  busy: () => boolean,
+): Promise<void> {
+  const { track, samples, description } = demux(part.bytes);
+  if (!samples.length) throw new Error('no frames found');
+  const startUs = part.start * 1e6;
+  const endUs = part.end * 1e6;
+  const tsOf = (x: Sample) => (x.cts / x.timescale) * 1e6;
+
+  let from = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const ts = tsOf(samples[i]);
+    if (ts > startUs) break;
+    if (samples[i].is_sync) from = i;
+  }
+  const spin = rotationSteps(track);
+  const edit: EditState = spin ? { ...part.edit, rotate: (part.edit.rotate + spin) % 4 } : part.edit;
+  const fps = fpsOf(samples);
+
+  let failure: Error | null = null;
+  const decoder = new VideoDecoder({
+    output: (frame) => {
+      try {
+        const ts = frame.timestamp;
+        if (ts >= startUs - 1 && ts < endUs) emit(frame, edit, startUs, fps);
+      } catch (e) {
+        failure = e as Error;
+      } finally {
+        frame.close();
+      }
+    },
+    error: (e) => (failure = e as Error),
+  });
+  decoder.configure({
+    codec: track.codec,
+    codedWidth: track.video?.width ?? track.track_width,
+    codedHeight: track.video?.height ?? track.track_height,
+    description,
+  });
+
+  for (let i = from; i < samples.length; i++) {
+    if (failure) throw failure;
+    const x = samples[i];
+    const ts = tsOf(x);
+    if (ts >= endUs) break;
+    decoder.decode(
+      new EncodedVideoChunk({
+        type: x.is_sync ? 'key' : 'delta',
+        timestamp: Math.round(ts),
+        duration: Math.round((x.duration / x.timescale) * 1e6),
+        data: x.data,
+      }),
+    );
+    while (decoder.decodeQueueSize > 8 || busy()) await sleep(4);
+  }
+  await decoder.flush();
+  decoder.close();
+  if (failure) throw failure;
+}
+
+/** Joins several clips into one MP4: one encoder, one muxer, timestamps running straight through. */
+async function runSeq(job: SeqJob) {
+  const { W, H, fps } = job;
+  const r = new Renderer(new OffscreenCanvas(W, H), true);
+  r.resize(W, H);
+  const target = new ArrayBufferTarget();
+  const muxer = new Muxer({
+    target,
+    video: { codec: 'avc', width: W, height: H, frameRate: fps },
+    audio: job.audio ? { codec: 'aac', numberOfChannels: job.audio.channels.length, sampleRate: job.audio.sampleRate } : undefined,
+    fastStart: 'in-memory',
+    firstTimestampBehavior: 'offset',
+  });
+  let failure: Error | null = null;
+  const bitrate = Math.round(Math.min(60e6, W * H * fps * (0.06 + 0.1 * job.quality)));
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => {
+      try {
+        muxer.addVideoChunk(chunk, meta);
+      } catch (e) {
+        failure = e as Error;
+      }
+    },
+    error: (e) => (failure = e as Error),
+  });
+  encoder.configure({ codec: 'avc1.640028', width: W, height: H, bitrate, framerate: fps, hardwareAcceleration: 'prefer-hardware', avc: { format: 'avc' } });
+
+  // Progress runs against the total output length, so the bar does not lurch when a
+  // short clip finishes next to a long one.
+  const totalUs = job.parts.reduce((a, x) => a + (x.end - x.start) * 1e6, 0) || 1;
+  let offsetUs = 0;
+  let encoded = 0;
+  let lastKeyUs = -1e9;
+  let lastProgress = 0;
+
+  for (const part of job.parts) {
+    if (failure) throw failure;
+    r.setTextLayer(part.text ?? null);
+    const base = offsetUs;
+    // Every clip starts on a keyframe, so seeking in the joined file lands cleanly.
+    let first = true;
+    await decodePart(
+      part,
+      (frame, edit, startUs, partFps) => {
+        r.updateFrame(frame);
+        r.render(edit, part.lut);
+        const at = Math.max(0, Math.round(base + (frame.timestamp - startUs)));
+        const key = first || at - lastKeyUs > 3e6;
+        first = false;
+        const out = new VideoFrame(r.canvas as OffscreenCanvas, { timestamp: at, duration: frame.duration ?? Math.round(1e6 / partFps) });
+        encoder.encode(out, { keyFrame: key });
+        if (key) lastKeyUs = at;
+        out.close();
+        encoded++;
+        const pct = at / totalUs;
+        if (pct - lastProgress > 0.02) {
+          lastProgress = pct;
+          ctx.postMessage({ id: job.id, progress: Math.min(0.99, pct) });
+        }
+      },
+      () => encoder.encodeQueueSize > 8,
+    );
+    offsetUs += (part.end - part.start) * 1e6;
+  }
+
+  if (failure) throw failure;
+  if (!encoded) throw new Error('none of those clips had frames to render');
+  await encoder.flush();
+  encoder.close();
+  if (job.audio) await addAudio(muxer, job.audio, (e) => (failure = e));
+  if (failure) throw failure;
+  muxer.finalize();
+  const buf = target.buffer;
+  r.dispose();
+  ctx.postMessage({ id: job.id, ok: true, buf, frames: encoded }, [buf]);
 }
 
 async function run(job: Job) {
@@ -240,5 +443,6 @@ async function run(job: Job) {
 
 ctx.onmessage = (e) => {
   const job = e.data;
-  run(job).catch((err) => ctx.postMessage({ id: job.id, ok: false, error: err instanceof Error ? err.message : String(err) }));
+  const go = 'kind' in job && job.kind === 'seq' ? runSeq(job) : run(job as Job);
+  go.catch((err) => ctx.postMessage({ id: job.id, ok: false, error: err instanceof Error ? err.message : String(err) }));
 };

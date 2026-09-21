@@ -4,6 +4,7 @@ import { Editor } from './components/Editor';
 import { ExportDialog } from './components/ExportDialog';
 import { PresetLab } from './components/PresetLab';
 import { SoundPicker } from './components/SoundPicker';
+import { CombineDialog } from './components/CombineDialog';
 import { PostPrompt } from './components/PostPrompt';
 import { initApp } from './lib/library';
 import { useStore } from './lib/store';
@@ -62,6 +63,7 @@ export default function App() {
       {modal === 'export' && <ExportDialog />}
       {modal === 'lab' && <PresetLab />}
       {modal === 'sounds' && <SoundPicker />}
+      {modal === 'combine' && <CombineDialog />}
       {dragOver && <div className="drop-hint">Drop to import</div>}
       <PostPrompt />
       <Busy />
